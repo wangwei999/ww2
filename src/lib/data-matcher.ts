@@ -333,10 +333,17 @@ export class DataMatcher {
             const matchedValue = this.findMatchedValue(targetHeader, sourceTimeMap);
             
             if (matchedValue !== null) {
-              const convertedValue = this.convertValue(matchedValue);
-              
               // 检测是否为百分比（三位数及以下）
               const isPercentage = matchedValue <= 999;
+              
+              let convertedValue;
+              if (isPercentage) {
+                // 百分比不进行单位转换，直接使用原始值
+                convertedValue = matchedValue;
+              } else {
+                // 非百分比进行单位转换
+                convertedValue = this.convertValue(matchedValue);
+              }
               
               newRow[col] = convertedValue;
               
@@ -344,7 +351,7 @@ export class DataMatcher {
                 rowIndex,
                 colIndex: col,
                 value: convertedValue,
-                converted: this.needsConversion(),
+                converted: !isPercentage && this.needsConversion(),
                 unitFrom: this.sourceUnit,
                 unitTo: this.targetUnit,
                 isPercentage,
@@ -401,10 +408,17 @@ export class DataMatcher {
           const matchedValue = this.findMatchedValue(fieldName, sourceTimeMap);
           
           if (matchedValue !== null) {
-            const convertedValue = this.convertValue(matchedValue);
-            
             // 检测是否为百分比（三位数及以下）
             const isPercentage = matchedValue <= 999;
+            
+            let convertedValue;
+            if (isPercentage) {
+              // 百分比不进行单位转换，直接使用原始值
+              convertedValue = matchedValue;
+            } else {
+              // 非百分比进行单位转换
+              convertedValue = this.convertValue(matchedValue);
+            }
             
             newRow[colIndex] = convertedValue;
             
@@ -412,7 +426,7 @@ export class DataMatcher {
               rowIndex,
               colIndex: colIndex,
               value: convertedValue,
-              converted: this.needsConversion(),
+              converted: !isPercentage && this.needsConversion(),
               unitFrom: this.sourceUnit,
               unitTo: this.targetUnit,
               isPercentage,

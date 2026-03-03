@@ -32,6 +32,7 @@ function FileUpload({ label, description, file, onFileChange, acceptedTypes }: F
         <div className="flex items-center gap-4">
           <div className="flex-1">
             <Input
+              key={file?.name || 'empty'} // 添加key强制重新渲染
               type="file"
               accept={acceptedTypes}
               onChange={(e) => onFileChange(e.target.files?.[0] || null)}
@@ -85,6 +86,16 @@ export default function Home() {
       sessionStorage.removeItem('processedFileId');
       setHasProcessedFile(false);
     }
+  };
+
+  const handleFileAChange = (file: File | null) => {
+    setFileA(file);
+    clearProcessedState();
+  };
+
+  const handleFileBChange = (file: File | null) => {
+    setFileB(file);
+    clearProcessedState();
   };
 
   const handleProcess = async () => {
@@ -204,10 +215,7 @@ export default function Home() {
             label="文件A（数据源文件）"
             description="上传包含完整数据的数据源文件"
             file={fileA}
-            onFileChange={(file) => {
-              setFileA(file);
-              if (!file) clearProcessedState();
-            }}
+            onFileChange={handleFileAChange}
             acceptedTypes=".xlsx,.xls,.docx,.doc"
           />
 
@@ -215,10 +223,7 @@ export default function Home() {
             label="文件B（数据缺失文件）"
             description="上传需要填充数据的缺失文件，横轴为字段，纵轴为时间点"
             file={fileB}
-            onFileChange={(file) => {
-              setFileB(file);
-              if (!file) clearProcessedState();
-            }}
+            onFileChange={handleFileBChange}
             acceptedTypes=".xlsx,.xls,.docx,.doc"
           />
         </div>

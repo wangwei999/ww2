@@ -96,10 +96,12 @@ function tableToExcel(table: any, matchResults: any[] = []): XLSX.WorkSheet {
   const worksheet = XLSX.utils.aoa_to_sheet(data);
   
   // 确保数值单元格的数据类型是数字（防止被误认为是日期）
+  // 跳过百分比单元格（已经是字符串格式）
   Object.keys(worksheet).forEach(cellRef => {
     if (cellRef.startsWith('!')) return; // 跳过元数据
     const cell = worksheet[cellRef];
-    if (cell && typeof cell.v === 'number') {
+    // 只对纯数字单元格设置为数字类型，不处理百分比字符串
+    if (cell && typeof cell.v === 'number' && !String(cell.v).includes('%')) {
       cell.t = 'n'; // 设置为数字类型
     }
   });

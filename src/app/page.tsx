@@ -79,6 +79,14 @@ export default function Home() {
     }
   }, []);
 
+  // 清空处理状态
+  const clearProcessedState = () => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('processedFileId');
+      setHasProcessedFile(false);
+    }
+  };
+
   const handleProcess = async () => {
     console.log('开始处理 - fileA:', fileA?.name, 'fileB:', fileB?.name);
     
@@ -196,7 +204,10 @@ export default function Home() {
             label="文件A（数据源文件）"
             description="上传包含完整数据的数据源文件"
             file={fileA}
-            onFileChange={setFileA}
+            onFileChange={(file) => {
+              setFileA(file);
+              if (!file) clearProcessedState();
+            }}
             acceptedTypes=".xlsx,.xls,.docx,.doc"
           />
 
@@ -204,7 +215,10 @@ export default function Home() {
             label="文件B（数据缺失文件）"
             description="上传需要填充数据的缺失文件，横轴为字段，纵轴为时间点"
             file={fileB}
-            onFileChange={setFileB}
+            onFileChange={(file) => {
+              setFileB(file);
+              if (!file) clearProcessedState();
+            }}
             acceptedTypes=".xlsx,.xls,.docx,.doc"
           />
         </div>

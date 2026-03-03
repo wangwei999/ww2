@@ -4,9 +4,16 @@ import { TableCell, NormalizedDate, UnitInfo } from './types';
 const DATE_PATTERNS = [
   { pattern: /(\d{4})[\/\-\.](\d{1,2})/, format: 'YM' },              // 2025/9, 2025-9, 2025.9
   { pattern: /(\d{4})年(\d{1,2})月/, format: 'YM_CN' },                 // 2025年9月
+  { pattern: /(\d{4})年底/, format: 'YEAR_END' },                        // 2025年底
+  { pattern: /(\d{4})年末/, format: 'YEAR_END' },                        // 2025年末
+  { pattern: /(\d{4})年(\d{1,2})月底/, format: 'MONTH_END_CN' },         // 2025年9月底
+  { pattern: /(\d{4})年(\d{1,2})月末/, format: 'MONTH_END_CN' },         // 2025年9月末
   { pattern: /(\d{4})(\d{2})/, format: 'YM_COMPACT' },                   // 202509
   { pattern: /(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/, format: 'YMD' }, // 2025/9/15
   { pattern: /(\d{4})年(\d{1,2})月(\d{1,2})日/, format: 'YMD_CN' },        // 2025年9月15日
+  // 英文月份格式
+  { pattern: /(\d{1,2})\/(\d{1,2})\/(\d{2,4})/, format: 'MDY' },          // 6/1/22, 6/1/2022
+  { pattern: /([A-Za-z]{3})-(\d{2})/, format: 'MON_YY' },                // Jun-23
 ];
 
 // 扩展的同义词映射
@@ -48,11 +55,63 @@ export function normalizeDate(dateStr: string): string {
   
   const trimmed = dateStr.trim();
   
-  for (const { pattern } of DATE_PATTERNS) {
+  for (const { pattern, format } of DATE_PATTERNS) {
     const match = trimmed.match(pattern);
     if (match) {
-      const year = match[1];
-      const month = match[2].padStart(2, '0');
+      let year: string;
+      let month: string;
+      
+      if (format === 'YM' || format === 'YM_CN' || format === 'YMD') {
+        year = match[1];
+        month = match[2].padStart(2, '0');
+      } else if (format === 'YEAR_END') {
+        year = match[1];
+        month = '12';
+      } else if (format === 'MONTH_END_CN') {
+        year = match[1];
+        month = match[2].padStart(2, '0');
+      } else if (format === 'YM_COMPACT') {
+        year = match[1];
+        month = match[2];
+      } else if (format === 'YMD_CN') {
+        year = match[1];
+        month = match[2].padStart(2, '0');
+      } else if (format === 'MDY') {
+        // 月/日/年 或 月/日/年的变体
+        const part1 = parseInt(match[1], 10);
+        const part2 = parseInt(match[2], 10);
+        const part3 = parseInt(match[3], 10);
+        
+        // 判断哪部分是年份（通常是最大的或者4位数的）
+        if (part3 >= 100 || (part3 >= 50 && part3 <= 99)) {
+          // 格式：月/日/年 (6/1/22)
+          year = part3 < 100 ? (part3 >= 50 ? 1900 + part3 : 2000 + part3).toString() : part3.toString();
+          month = part1.toString().padStart(2, '0');
+        } else if (part1 >= 100 || (part1 >= 50 && part1 <= 99)) {
+          // 格式：年/月/日 (2022/6/1)
+          year = part1 < 100 ? (part1 >= 50 ? 1900 + part1 : 2000 + part1).toString() : part1.toString();
+          month = part2.toString().padStart(2, '0');
+        } else {
+          // 默认按月/日/年处理
+          year = part3 < 100 ? (part3 >= 50 ? 1900 + part3 : 2000 + part3).toString() : part3.toString();
+          month = part1.toString().padStart(2, '0');
+        }
+      } else if (format === 'MON_YY') {
+        // 英文月份-年份 (Jun-23)
+        const monthNames: Record<string, string> = {
+          'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
+          'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
+          'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+        };
+        const monthAbbr = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
+        const yearNum = parseInt(match[2], 10);
+        month = monthNames[monthAbbr] || '01';
+        year = (yearNum < 100 ? (yearNum >= 50 ? 1900 + yearNum : 2000 + yearNum) : yearNum).toString();
+      } else {
+        year = match[1];
+        month = match[2].padStart(2, '0');
+      }
+      
       return `${year}-${month}`;
     }
   }
@@ -68,11 +127,59 @@ export function parseDate(dateStr: string): NormalizedDate | null {
   
   const trimmed = dateStr.trim();
   
-  for (const { pattern } of DATE_PATTERNS) {
+  for (const { pattern, format } of DATE_PATTERNS) {
     const match = trimmed.match(pattern);
     if (match) {
-      const year = parseInt(match[1], 10);
-      const month = parseInt(match[2], 10);
+      let year: number;
+      let month: number;
+      
+      if (format === 'YM' || format === 'YM_CN' || format === 'YMD') {
+        year = parseInt(match[1], 10);
+        month = parseInt(match[2], 10);
+      } else if (format === 'YEAR_END') {
+        year = parseInt(match[1], 10);
+        month = 12;
+      } else if (format === 'MONTH_END_CN') {
+        year = parseInt(match[1], 10);
+        month = parseInt(match[2], 10);
+      } else if (format === 'YM_COMPACT') {
+        year = parseInt(match[1], 10);
+        month = parseInt(match[2], 10);
+      } else if (format === 'YMD_CN') {
+        year = parseInt(match[1], 10);
+        month = parseInt(match[2], 10);
+      } else if (format === 'MDY') {
+        // 月/日/年 或 月/日/年的变体
+        const part1 = parseInt(match[1], 10);
+        const part2 = parseInt(match[2], 10);
+        const part3 = parseInt(match[3], 10);
+        
+        // 判断哪部分是年份（通常是最大的或者4位数的）
+        if (part3 >= 100 || (part3 >= 50 && part3 <= 99)) {
+          year = part3 < 100 ? (part3 >= 50 ? 1900 + part3 : 2000 + part3) : part3;
+          month = part1;
+        } else if (part1 >= 100 || (part1 >= 50 && part1 <= 99)) {
+          year = part1 < 100 ? (part1 >= 50 ? 1900 + part1 : 2000 + part1) : part1;
+          month = part2;
+        } else {
+          year = part3 < 100 ? (part3 >= 50 ? 1900 + part3 : 2000 + part3) : part3;
+          month = part1;
+        }
+      } else if (format === 'MON_YY') {
+        // 英文月份-年份 (Jun-23)
+        const monthNames: Record<string, number> = {
+          'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
+          'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
+          'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+        };
+        const monthAbbr = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
+        const yearNum = parseInt(match[2], 10);
+        month = monthNames[monthAbbr] || 1;
+        year = yearNum < 100 ? (yearNum >= 50 ? 1900 + yearNum : 2000 + yearNum) : yearNum;
+      } else {
+        year = parseInt(match[1], 10);
+        month = parseInt(match[2], 10);
+      }
       
       return {
         original: trimmed,

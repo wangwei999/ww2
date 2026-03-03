@@ -8,6 +8,7 @@ import {
   parseNumberCell,
   normalizeDate,
 } from './data-utils';
+import { convertExcelValue } from './excel-date-utils';
 
 /**
  * 文件解析器
@@ -78,11 +79,18 @@ export class FileParser {
       const worksheet = workbook.Sheets[sheetName];
       const rawData = XLSX.utils.sheet_to_json<TableCell[]>(worksheet, { 
         header: 1,
-        defval: null 
+        defval: null,
+        raw: false,  // 不使用原始值，使用格式化后的值
+        dateNF: 'yyyy-mm-dd'  // 日期格式
       });
       
       if (rawData.length > 0) {
-        const tablesInSheet = this.extractTablesFromRawData(rawData);
+        // 转换Excel日期序列号
+        const convertedData = rawData.map(row => 
+          row.map(cell => convertExcelValue(cell))
+        );
+        
+        const tablesInSheet = this.extractTablesFromRawData(convertedData);
         tables.push(...tablesInSheet);
       }
     }
@@ -183,30 +191,45 @@ export class FileParser {
     let currentTable: TableCell[][] = [];
     let consecutiveEmptyRows = 0;
     const maxEmptyRows = 2; // 连续空行数超过这个值则认为表格结束
+    let hasFoundDataAfterHeader = false; // 是否已经找到表头后的数据行
     
     for (const row of rawData) {
       const hasData = row.some(cell => !isCellEmpty(cell) && cell !== null);
       
       if (hasData) {
         consecutiveEmptyRows = 0;
-        currentTable.push(row);
+        
+        // 如果已经找到了表头后的数据行，继续添加行
+        // 否则，如果当前表为空，开始新表格
+        if (hasFoundDataAfterHeader || currentTable.length === 0) {
+          currentTable.push(row);
+          if (currentTable.length > 1) {
+            hasFoundDataAfterHeader = true;
+          }
+        } else {
+          // 当前表只有表头，这是第一条数据行，添加到当前表
+          currentTable.push(row);
+          hasFoundDataAfterHeader = true;
+        }
       } else if (currentTable.length > 0) {
         consecutiveEmptyRows++;
         currentTable.push(row);
         
-        // 如果连续空行过多，结束当前表格
-        if (consecutiveEmptyRows >= maxEmptyRows) {
+        // 如果连续空行过多，且已经找到数据行，结束当前表格
+        if (consecutiveEmptyRows >= maxEmptyRows && hasFoundDataAfterHeader) {
           if (currentTable.length > 0) {
             tables.push(this.createTableFromRawData(currentTable));
           }
           currentTable = [];
           consecutiveEmptyRows = 0;
+          hasFoundDataAfterHeader = false;
         }
       }
     }
     
-    // 添加最后一个表格
+    // 添加最后一个表格（即使没有找到数据行，也要保存）
     if (currentTable.length > 0) {
+      // 如果只有表头没有数据行，也要保存
       tables.push(this.createTableFromRawData(currentTable));
     }
     
@@ -248,6 +271,11 @@ export class FileParser {
     // 第一行作为表头
     const headers = cleanedData[0].map(h => String(h || ''));
     const rows = cleanedData.slice(1);
+    
+    console.log('createTableFromRawData - 原始数据行数:', data.length);
+    console.log('createTableFromRawData - 过滤后行数:', cleanedData.length);
+    console.log('createTableFromRawData - 表头列数:', headers.length);
+    console.log('createTableFromRawData - 数据行数:', rows.length);
     
     return {
       headers,

@@ -250,7 +250,11 @@ export async function POST(request: NextRequest) {
     // 批量匹配
     // 根据需求：如果文件B包含"单位：万元 %"字样，则保持原始格式（不进行单位转换和百分比格式化）
     const keepOriginalFormat = parseResultB.keepOriginalFormat || false;
+    console.log('=== 原始格式检测 ===');
+    console.log('文件B包含"单位：万元 %"?', !!parseResultB.keepOriginalFormat);
     console.log('是否保持原始格式:', keepOriginalFormat);
+    console.log('源文件单位:', parseResultA.unit || '万元');
+    console.log('目标文件单位:', keepOriginalFormat ? '万元' : '亿元');
     
     const matcher = new BatchDataMatcher(
       parseResultA.tables,

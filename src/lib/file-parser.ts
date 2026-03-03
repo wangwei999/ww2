@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
 import Papa from 'papaparse';
+import * as cheerio from 'cheerio';
 import { TableCell, TableData, ParseResult } from './types';
 import {
   extractUnitInfo,
@@ -161,37 +162,89 @@ export class FileParser {
    */
   private static async parseWord(buffer: Buffer): Promise<TableData[]> {
     console.log('parseWord - 开始解析 Word 文件');
-    const result = await mammoth.extractRawText({ buffer });
-    const text = result.value;
     
-    console.log('parseWord - 提取的文本长度:', text.length);
+    const result = await mammoth.convertToHtml({ buffer });
+    const html = result.value;
     
-    // Word 文件中的表格需要特殊处理
-    // 这里先简单实现，提取可能包含表格的段落
+    console.log('parseWord - 提取的 HTML 长度:', html.length);
+    
+    // 使用 cheerio 解析 HTML
+    const $ = cheerio.load(html);
     const tables: TableData[] = [];
-    const lines = text.split('\n').filter(line => line.trim());
     
-    console.log('parseWord - 非空行数:', lines.length);
+    // 查找所有表格
+    const $tables = $('table');
+    console.log('parseWord - 找到表格数量:', $tables.length);
     
-    // 尝试检测表格行（包含制表符或多个空格分隔）
-    const potentialTableRows = lines.filter(line => {
-      return line.includes('\t') || line.split(/\s{2,}/).length > 2;
-    });
-    
-    console.log('parseWord - 检测到的潜在表格行数:', potentialTableRows.length);
-    
-    if (potentialTableRows.length > 0) {
-      console.log('parseWord - 前5行潜在表格行:', potentialTableRows.slice(0, 5));
-      const tableData = potentialTableRows.map(line => {
-        return line.split('\t').map(cell => cell.trim());
+    $tables.each((index, tableElement) => {
+      const $table = $(tableElement);
+      
+      // 提取表头
+      const $headerRow = $table.find('tr').first();
+      const headers: string[] = [];
+      $headerRow.find('td, th').each((i, cell) => {
+        headers.push($(cell).text().trim());
       });
       
-      tables.push(this.createTableFromRawData(tableData));
-    } else {
-      console.log('parseWord - 警告：没有检测到表格行');
-    }
+      // 提取数据行（跳过表头行）
+      const rows: TableCell[][] = [];
+      $table.find('tr').slice(1).each((i, rowElement) => {
+        const $row = $(rowElement);
+        const cells: TableCell[] = [];
+        $row.find('td, th').each((j, cellElement) => {
+          const cellText = $(cellElement).text().trim();
+          // 尝试转换为数字
+          const numValue = parseFloat(cellText);
+          cells.push(isNaN(numValue) ? cellText : numValue);
+        });
+        
+        // 只保留有数据的行
+        if (cells.some(cell => cell !== '' && cell !== null && cell !== undefined)) {
+          rows.push(cells);
+        }
+      });
+      
+      console.log(`parseWord - 表格 ${index + 1}:`);
+      console.log(`  表头列数: ${headers.length}`);
+      console.log(`  数据行数: ${rows.length}`);
+      console.log(`  表头: ${headers.slice(0, 5).join(', ')}...`);
+      
+      // 只保留有表头和数据的表格
+      if (headers.length > 0 && rows.length > 0) {
+        tables.push({
+          headers,
+          rows,
+        });
+      }
+    });
     
-    console.log('parseWord - 返回表格数量:', tables.length);
+    console.log('parseWord - 返回有效表格数量:', tables.length);
+    
+    // 如果没有找到表格，尝试使用备用方法
+    if (tables.length === 0) {
+      console.log('parseWord - 未找到表格，尝试备用方法...');
+      const fallbackResult = await mammoth.extractRawText({ buffer });
+      const text = fallbackResult.value;
+      const lines = text.split('\n').filter(line => line.trim());
+      
+      // 检测表格行（包含制表符或多个空格分隔）
+      const potentialTableRows = lines.filter(line => {
+        return line.includes('\t') || line.split(/\s{2,}/).length > 2;
+      });
+      
+      console.log('parseWord - 备用方法检测到潜在表格行数:', potentialTableRows.length);
+      
+      if (potentialTableRows.length > 1) {
+        const tableData = potentialTableRows.map(line => {
+          return line.split('\t').map(cell => cell.trim());
+        });
+        
+        const fallbackTable = this.createTableFromRawData(tableData);
+        if (fallbackTable.headers.length > 0 && fallbackTable.rows.length > 0) {
+          tables.push(fallbackTable);
+        }
+      }
+    }
     
     return tables;
   }

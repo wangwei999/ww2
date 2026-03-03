@@ -25,8 +25,9 @@ async function ensureTempDir() {
  * @param keepOriginalFormat 是否保持原始格式（不进行百分比格式化）
  */
 function tableToExcel(table: any, matchResults: any[] = [], keepOriginalFormat: boolean = false): XLSX.WorkSheet {
-  console.log('转换表格到 Excel 格式...');
+  console.log('=== 转换表格到 Excel 格式 ===');
   console.log('保持原始格式:', keepOriginalFormat);
+  console.log('表格对象:', JSON.stringify(table, null, 2).substring(0, 500));
   console.log('表格 headers:', table.headers);
   console.log('表格 rows 数量:', table.rows?.length);
   
@@ -42,6 +43,13 @@ function tableToExcel(table: any, matchResults: any[] = [], keepOriginalFormat: 
     console.error('rows 不是数组:', rows);
     throw new Error('表格 rows 必须是数组');
   }
+  
+  // 检查行数据
+  console.log('前3行数据:');
+  rows.slice(0, 3).forEach((row: any, idx: number) => {
+    console.log(`  行 ${idx}:`, row);
+    console.log(`    长度: ${row?.length}, 类型: ${Array.isArray(row) ? '数组' : typeof row}`);
+  });
   
   // 创建百分比映射（用于快速查找）
   const percentageMap = new Map<string, boolean>();
@@ -138,7 +146,7 @@ function sanitizeFilename(filename: string): string {
  * @param keepOriginalFormat 是否保持原始格式（不进行百分比格式化）
  */
 function saveAsExcel(tables: any[], filename: string, matchResults: any[] = [], keepOriginalFormat: boolean = false): string {
-  console.log('开始保存 Excel 文件...');
+  console.log('=== 开始保存 Excel 文件 ===');
   console.log('原始文件名:', filename);
   console.log('TEMP_DIR:', TEMP_DIR);
   console.log('TEMP_DIR 存在:', existsSync(TEMP_DIR));
@@ -146,10 +154,17 @@ function saveAsExcel(tables: any[], filename: string, matchResults: any[] = [], 
   console.log('匹配结果数量:', matchResults.length);
   console.log('保持原始格式:', keepOriginalFormat);
   
+  // 打印表格信息
+  tables.forEach((table, index) => {
+    console.log(`表格 ${index + 1}:`);
+    console.log(`  headers: ${JSON.stringify(table.headers)}`);
+    console.log(`  rows 数量: ${table.rows?.length}`);
+  });
+  
   const workbook = XLSX.utils.book_new();
   
   tables.forEach((table, index) => {
-    console.log(`处理表格 ${index + 1}...`);
+    console.log(`\n处理表格 ${index + 1}...`);
     const worksheet = tableToExcel(table, matchResults, keepOriginalFormat);
     XLSX.utils.book_append_sheet(workbook, worksheet, `Sheet${index + 1}`);
   });

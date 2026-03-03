@@ -2,19 +2,20 @@ import { TableCell, NormalizedDate, UnitInfo } from './types';
 
 // 日期格式正则表达式（更全面的匹配）
 const DATE_PATTERNS = [
-  { pattern: /(\d{4})[\/\-\.](\d{1,2})/, format: 'YM' },              // 2025/9, 2025-9, 2025.9
-  { pattern: /(\d{4})年(\d{1,2})月/, format: 'YM_CN' },                 // 2025年9月
-  { pattern: /(\d{4})年底/, format: 'YEAR_END' },                        // 2025年底
-  { pattern: /(\d{4})年末/, format: 'YEAR_END' },                        // 2025年末
-  { pattern: /(\d{4})年(\d{1,2})月底/, format: 'MONTH_END_CN' },         // 2025年9月底
-  { pattern: /(\d{4})年(\d{1,2})月末/, format: 'MONTH_END_CN' },         // 2025年9月末
-  { pattern: /(\d{4})年/, format: 'YEAR_ONLY' },                          // 2025年, 2021年
-  { pattern: /(\d{4})(\d{2})/, format: 'YM_COMPACT' },                   // 202509
+  { pattern: /(\d{4})\.(\d{1,2})/, format: 'YMDOT' },                // 2025.9, 2024.3 (支持点号分隔)
+  { pattern: /(\d{4})[\/\-](\d{1,2})/, format: 'YM' },                // 2025/9, 2025-9, 2025.9
+  { pattern: /(\d{4})年(\d{1,2})月/, format: 'YM_CN' },               // 2025年9月
+  { pattern: /(\d{4})年底/, format: 'YEAR_END' },                      // 2025年底
+  { pattern: /(\d{4})年末/, format: 'YEAR_END' },                      // 2025年末
+  { pattern: /(\d{4})年(\d{1,2})月底/, format: 'MONTH_END_CN' },       // 2025年9月底
+  { pattern: /(\d{4})年(\d{1,2})月末/, format: 'MONTH_END_CN' },       // 2025年9月末
+  { pattern: /(\d{4})年/, format: 'YEAR_ONLY' },                       // 2025年, 2021年
+  { pattern: /(\d{4})(\d{2})/, format: 'YM_COMPACT' },                 // 202509
   { pattern: /(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/, format: 'YMD' }, // 2025/9/15
-  { pattern: /(\d{4})年(\d{1,2})月(\d{1,2})日/, format: 'YMD_CN' },        // 2025年9月15日
+  { pattern: /(\d{4})年(\d{1,2})月(\d{1,2})日/, format: 'YMD_CN' },    // 2025年9月15日
   // 英文月份格式
-  { pattern: /(\d{1,2})\/(\d{1,2})\/(\d{2,4})/, format: 'MDY' },          // 6/1/22, 6/1/2022
-  { pattern: /([A-Za-z]{3})-(\d{2})/, format: 'MON_YY' },                // Jun-23
+  { pattern: /(\d{1,2})\/(\d{1,2})\/(\d{2,4})/, format: 'MDY' },        // 6/1/22, 6/1/2022
+  { pattern: /([A-Za-z]{3})-(\d{2})/, format: 'MON_YY' },              // Jun-23
 ];
 
 /**
@@ -84,6 +85,10 @@ export function normalizeDate(dateStr: string): string {
       let month: string;
       
       if (format === 'YM' || format === 'YM_CN' || format === 'YMD') {
+        year = match[1];
+        month = match[2].padStart(2, '0');
+      } else if (format === 'YMDOT') {
+        // 点号分隔格式：2024.3 -> 2024-03
         year = match[1];
         month = match[2].padStart(2, '0');
       } else if (format === 'YEAR_END') {

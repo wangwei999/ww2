@@ -267,14 +267,32 @@ export class FileParser {
       };
     }
     
-    // 第一行作为表头
-    const headers = cleanedData[0].map(h => String(h || ''));
-    const rows = cleanedData.slice(1);
+    // 检测并跳过标题行
+    // 如果第一行只有1列，而第二行有更多列，第一行可能是标题行
+    let headerRowIndex = 0;
+    if (cleanedData.length > 1) {
+      const firstRowColCount = cleanedData[0].filter(c => !isCellEmpty(c)).length;
+      const secondRowColCount = cleanedData[1].filter(c => !isCellEmpty(c)).length;
+      
+      console.log('createTableFromRawData - 第一行列数:', firstRowColCount);
+      console.log('createTableFromRawData - 第二行列数:', secondRowColCount);
+      
+      if (firstRowColCount === 1 && secondRowColCount > 2) {
+        console.log('createTableFromRawData - 检测到标题行，跳过第一行');
+        headerRowIndex = 1;
+      }
+    }
+    
+    // 使用检测到的表头行
+    const headers = cleanedData[headerRowIndex].map(h => String(h || ''));
+    const rows = cleanedData.slice(headerRowIndex + 1);
     
     console.log('createTableFromRawData - 原始数据行数:', data.length);
     console.log('createTableFromRawData - 过滤后行数:', cleanedData.length);
+    console.log('createTableFromRawData - 表头行索引:', headerRowIndex);
     console.log('createTableFromRawData - 表头列数:', headers.length);
     console.log('createTableFromRawData - 数据行数:', rows.length);
+    console.log('createTableFromRawData - 表头内容:', headers.slice(0, 10));
     
     return {
       headers,

@@ -6,6 +6,7 @@ import {
   convertUnit,
   parseNumberCell,
   isCellEmpty,
+  cleanFieldName,
 } from './data-utils';
 import { excelDateToString, isExcelDate } from './excel-date-utils';
 
@@ -54,10 +55,18 @@ export class DataMatcher {
    */
   private initialize(): void {
     console.log('DataMatcher - 开始初始化...');
-    // 检测表格方向
-    this.isVertical = this.detectTableDirection();
-    console.log('DataMatcher - 表格方向:', this.isVertical ? '纵向' : '横向');
-    
+
+    // 分别检测两个文件的表格方向
+    const sourceDirection = this.detectTableDirection(this.sourceTable);
+    const targetDirection = this.detectTableDirection(this.targetTable);
+
+    console.log('DataMatcher - 源表格方向:', sourceDirection.isVertical ? '纵向' : '横向');
+    console.log('DataMatcher - 目标表格方向:', targetDirection.isVertical ? '纵向' : '横向');
+
+    // 使用目标文件的方向作为主方向
+    this.isVertical = targetDirection.isVertical;
+    console.log('DataMatcher - 最终表格方向:', this.isVertical ? '纵向' : '横向');
+
     if (this.isVertical) {
       // 纵向表格：第一列是时间
       this.sourceTimeColumnIndex = this.identifyTimeColumn(this.sourceTable);
@@ -68,44 +77,47 @@ export class DataMatcher {
       this.timePointsInRow = this.extractTimePointsFromRow(this.targetTable.headers);
       console.log('检测到横向表格，时间点:', Array.from(this.timePointsInRow.entries()));
     }
-    
+
     // 构建源数据索引
     console.log('DataMatcher - 构建源数据索引...');
     this.buildSourceIndex();
   }
-  
+
   /**
    * 检测表格方向
    */
-  private detectTableDirection(): boolean {
+  private detectTableDirection(table: TableData): { isVertical: boolean; firstColumnRatio: number; firstRowRatio: number } {
     // 检查第一列是否包含时间
     let firstColumnDateCount = 0;
-    for (const row of this.targetTable.rows) {
+    for (const row of table.rows) {
       const cell = row[0];
       if (cell && normalizeDate(String(cell)) !== String(cell)) {
         firstColumnDateCount++;
       }
     }
-    
+
     // 检查第一行是否包含时间
     let firstRowDateCount = 0;
-    for (let i = 0; i < this.targetTable.headers.length; i++) {
-      const header = this.targetTable.headers[i];
+    for (let i = 0; i < table.headers.length; i++) {
+      const header = table.headers[i];
       if (header && normalizeDate(String(header)) !== String(header)) {
         firstRowDateCount++;
       }
     }
-    
+
     // 如果第一行的日期占比更高，认为是横向表格
-    const firstColumnRatio = this.targetTable.rows.length > 0 
-      ? firstColumnDateCount / this.targetTable.rows.length 
+    const firstColumnRatio = table.rows.length > 0
+      ? firstColumnDateCount / table.rows.length
       : 0;
-    const firstRowRatio = this.targetTable.headers.length > 0 
-      ? firstRowDateCount / this.targetTable.headers.length 
+    const firstRowRatio = table.headers.length > 0
+      ? firstRowDateCount / table.headers.length
       : 0;
-    
-    console.log(`第一列日期占比: ${firstColumnRatio}, 第一行日期占比: ${firstRowRatio}`);
-    return firstColumnRatio >= firstRowRatio;
+
+    const isVertical = firstColumnRatio >= firstRowRatio;
+
+    console.log(`表格方向检测 - 第一列日期占比: ${firstColumnRatio}, 第一行日期占比: ${firstRowRatio}, 结果: ${isVertical ? '纵向' : '横向'}`);
+
+    return { isVertical, firstColumnRatio, firstRowRatio };
   }
   
   /**

@@ -217,18 +217,18 @@ export function parseDate(dateStr: string): NormalizedDate | null {
 /**
  * 清理字段名，移除单位、括号等后缀
  */
-function cleanFieldName(fieldName: string): string {
+export function cleanFieldName(fieldName: string): string {
   let cleaned = fieldName.trim();
-  
+
   // 移除单位后缀（如"（亿元）"、"（%）"、"(%)"等）
   cleaned = cleaned.replace(/[（\(][^\)）]*[）\)]/g, '');
-  
+
   // 移除末尾的单位（如"亿元"、"万元"、"元"等）
   cleaned = cleaned.replace(/(?:亿元|万元|千元|百元|元|元)%?$/g, '');
-  
+
   // 移除末尾的百分号
   cleaned = cleaned.replace(/%$/g, '');
-  
+
   return cleaned.trim();
 }
 

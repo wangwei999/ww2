@@ -140,9 +140,13 @@ export class DataMatcher {
     const timePoints = new Map<number, string>();
 
     console.log('开始提取时间点，表头列数:', headers.length);
+    console.log('表头内容:', headers);
+    
     for (let i = 0; i < headers.length; i++) {
       const header = headers[i];
       let normalized: string | null = null;
+
+      console.log(`处理列${i}: "${header}" (类型: ${typeof header})`);
 
       // 1. 检查是否是 Excel 日期序列号
       if (typeof header === 'number' && isExcelDate(header)) {
@@ -154,14 +158,20 @@ export class DataMatcher {
         }
       } else if (header) {
         // 2. 检查是否是文本日期
-        normalized = normalizeDate(String(header));
-        if (normalized !== String(header)) {
+        const headerStr = String(header);
+        normalized = normalizeDate(headerStr);
+        console.log(`列${i} 文本日期检查: "${headerStr}" -> "${normalized}" (是否变化: ${normalized !== headerStr})`);
+        
+        if (normalized !== headerStr) {
           console.log(`列${i} 检测到文本日期 ${header} -> ${normalized}`);
         }
       }
 
       if (normalized && header && normalized !== String(header)) {
         timePoints.set(i, normalized);
+        console.log(`列${i} 添加时间点: ${normalized}`);
+      } else {
+        console.log(`列${i} 未添加时间点 (normalized: ${normalized}, header: ${header})`);
       }
     }
 

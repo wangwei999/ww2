@@ -14,6 +14,7 @@ export interface ParseResult {
   tables: TableData[];
   unit?: string;
   filename: string;
+  keepOriginalFormat?: boolean;  // 是否保持原始格式（不进行单位转换和百分比格式化）
 }
 
 // 字段匹配配置

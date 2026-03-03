@@ -20,9 +20,13 @@ async function ensureTempDir() {
 
 /**
  * 将表格数据转换为 Excel 格式
+ * @param table 表格数据
+ * @param matchResults 匹配结果
+ * @param keepOriginalFormat 是否保持原始格式（不进行百分比格式化）
  */
-function tableToExcel(table: any, matchResults: any[] = []): XLSX.WorkSheet {
+function tableToExcel(table: any, matchResults: any[] = [], keepOriginalFormat: boolean = false): XLSX.WorkSheet {
   console.log('转换表格到 Excel 格式...');
+  console.log('保持原始格式:', keepOriginalFormat);
   console.log('表格 headers:', table.headers);
   console.log('表格 rows 数量:', table.rows?.length);
   
@@ -76,7 +80,11 @@ function tableToExcel(table: any, matchResults: any[] = []): XLSX.WorkSheet {
       
       // 如果是数值且被标记为百分比
       if (typeof cell === 'number' && isPercentage) {
-        // 保留两位小数，添加 % 符号
+        // 如果保持原始格式，只保留两位小数，不添加 % 符号
+        if (keepOriginalFormat) {
+          return parseFloat(cell.toFixed(2));
+        }
+        // 否则保留两位小数，添加 % 符号
         return `${cell.toFixed(2)}%`;
       }
       
@@ -122,19 +130,27 @@ function sanitizeFilename(filename: string): string {
 /**
  * 保存为 Excel 文件
  */
-function saveAsExcel(tables: any[], filename: string, matchResults: any[] = []): string {
+/**
+ * 保存为 Excel 文件
+ * @param tables 表格数据
+ * @param filename 文件名
+ * @param matchResults 匹配结果
+ * @param keepOriginalFormat 是否保持原始格式（不进行百分比格式化）
+ */
+function saveAsExcel(tables: any[], filename: string, matchResults: any[] = [], keepOriginalFormat: boolean = false): string {
   console.log('开始保存 Excel 文件...');
   console.log('原始文件名:', filename);
   console.log('TEMP_DIR:', TEMP_DIR);
   console.log('TEMP_DIR 存在:', existsSync(TEMP_DIR));
   console.log('要保存的表格数量:', tables.length);
   console.log('匹配结果数量:', matchResults.length);
+  console.log('保持原始格式:', keepOriginalFormat);
   
   const workbook = XLSX.utils.book_new();
   
   tables.forEach((table, index) => {
     console.log(`处理表格 ${index + 1}...`);
-    const worksheet = tableToExcel(table, matchResults);
+    const worksheet = tableToExcel(table, matchResults, keepOriginalFormat);
     XLSX.utils.book_append_sheet(workbook, worksheet, `Sheet${index + 1}`);
   });
   
@@ -232,12 +248,15 @@ export async function POST(request: NextRequest) {
     }
     
     // 批量匹配
-    // 根据需求：源文件默认单位为万元，输出文件转化为亿元
+    // 根据需求：如果文件B包含"单位：万元 %"字样，则保持原始格式（不进行单位转换和百分比格式化）
+    const keepOriginalFormat = parseResultB.keepOriginalFormat || false;
+    console.log('是否保持原始格式:', keepOriginalFormat);
+    
     const matcher = new BatchDataMatcher(
       parseResultA.tables,
       parseResultB.tables,
       parseResultA.unit || '万元',  // 源文件默认为万元
-      '亿元',  // 输出文件强制为亿元
+      keepOriginalFormat ? '万元' : '亿元',  // 如果保持原始格式，则输出为万元，否则为亿元
       parseResultA.tables[0]?.hasPercentage,
       parseResultB.tables[0]?.hasPercentage
     );
@@ -312,7 +331,7 @@ export async function POST(request: NextRequest) {
     const fileId = `${Date.now()}_${originalFilename}.xlsx`;
     console.log('生成的文件ID:', fileId);
     
-    const savedFilename = saveAsExcel([finalTable], fileId, allMatchResults);
+    const savedFilename = saveAsExcel([finalTable], fileId, allMatchResults, keepOriginalFormat);
     
     console.log('文件保存成功:', savedFilename);
     

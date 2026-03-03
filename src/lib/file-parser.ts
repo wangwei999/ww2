@@ -26,6 +26,9 @@ export class FileParser {
     const textSample = buffer.toString('utf-8', 0, Math.min(3000, buffer.length));
     const unitInfo = extractUnitInfo(textSample);
     
+    // 检测是否包含"单位：万元 %"字样，如果是，则保持原始格式（不进行单位转换和百分比格式化）
+    const keepOriginalFormat = textSample.includes('单位：万元 %') || textSample.includes('单位: 万元 %');
+    
     let tables: TableData[] = [];
     
     switch (ext) {
@@ -57,6 +60,7 @@ export class FileParser {
       tables,
       unit: unitInfo?.unit,
       filename: file.name,
+      keepOriginalFormat,
     };
   }
   

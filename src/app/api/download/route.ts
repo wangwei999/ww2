@@ -31,30 +31,13 @@ export async function GET(request: NextRequest) {
     const fileBuffer = await readFile(filePath);
     console.log('下载请求 - 读取文件大小:', fileBuffer.length, 'bytes');
     
-    // 获取文件名和扩展名
+    // 获取文件名
     const fileName = fileId.replace(/^\d+_/, '');
-    const fileExt = path.extname(fileName).toLowerCase();
     console.log('下载请求 - 文件名:', fileName);
-    console.log('下载请求 - 文件扩展名:', fileExt);
-    
-    // 根据文件扩展名设置正确的Content-Type
-    let contentType = 'application/octet-stream';
-    if (fileExt === '.xlsx') {
-      contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-    } else if (fileExt === '.xls') {
-      contentType = 'application/vnd.ms-excel';
-    } else if (fileExt === '.docx') {
-      contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    } else if (fileExt === '.doc') {
-      contentType = 'application/msword';
-    } else if (fileExt === '.csv') {
-      contentType = 'text/csv';
-    }
-    console.log('下载请求 - Content-Type:', contentType);
     
     // 设置响应头
     const headers = new Headers();
-    headers.set('Content-Type', contentType);
+    headers.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     // 使用 RFC 5987 格式的 Content-Disposition
     headers.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);
     headers.set('Content-Length', String(fileBuffer.length));

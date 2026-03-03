@@ -7,7 +7,6 @@ import { FileParser } from '@/lib/file-parser';
 import { BatchDataMatcher } from '@/lib/data-matcher';
 import { excelDateToString, isExcelDate } from '@/lib/excel-date-utils';
 import { adjustToMonthEnd } from '@/lib/data-utils';
-import { tablesToDocx } from '@/lib/docx-utils';
 
 // 临时文件存储目录
 const TEMP_DIR = path.join(process.cwd(), 'temp');
@@ -369,37 +368,10 @@ export async function POST(request: NextRequest) {
     
     // 保存结果（只保存一个表格）
     const originalFilename = fileB.name.replace(/\.[^/.]+$/, ""); // 移除扩展名
-    const fileExt = path.extname(fileB.name).toLowerCase(); // 获取文件扩展名
+    const fileId = `${Date.now()}_${originalFilename}.xlsx`;
+    console.log('生成的文件ID:', fileId);
     
-    console.log('文件B原始名称:', fileB.name);
-    console.log('文件扩展名:', fileExt);
-    console.log('导出格式:', fileExt === '.docx' ? 'DOCX' : 'XLSX');
-    
-    // 根据文件扩展名决定导出格式
-    let savedFilename: string;
-    
-    if (fileExt === '.docx') {
-      // 导出为DOCX
-      const fileId = `${Date.now()}_${originalFilename}.docx`;
-      console.log('生成的文件ID:', fileId);
-      
-      const docxBuffer = await tablesToDocx([finalTable], originalFilename);
-      const filePath = path.join(TEMP_DIR, fileId);
-      
-      // 确保目录存在
-      if (!existsSync(TEMP_DIR)) {
-        mkdirSync(TEMP_DIR, { recursive: true });
-      }
-      
-      writeFileSync(filePath, docxBuffer);
-      savedFilename = fileId;
-    } else {
-      // 导出为XLSX
-      const fileId = `${Date.now()}_${originalFilename}.xlsx`;
-      console.log('生成的文件ID:', fileId);
-      
-      savedFilename = saveAsExcel([finalTable], fileId, allMatchResults, keepOriginalFormat);
-    }
+    const savedFilename = saveAsExcel([finalTable], fileId, allMatchResults, keepOriginalFormat);
     
     console.log('文件保存成功:', savedFilename);
     

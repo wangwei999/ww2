@@ -250,10 +250,10 @@ export function cleanFieldName(fieldName: string): string {
 export function fieldMatches(fieldA: string, fieldB: string): boolean {
   if (!fieldA || !fieldB) return false;
   
-  let normalizedA = fieldA.trim().toLowerCase();
-  let normalizedB = fieldB.trim().toLowerCase();
-  
   // 移除常见的前缀（如"其中："、"其中"）
+  let normalizedA = fieldA.trim();
+  let normalizedB = fieldB.trim();
+  
   const prefixes = ['其中：', '其中', '包括：', '包括', '含：', '含'];
   for (const prefix of prefixes) {
     if (normalizedA.startsWith(prefix)) {
@@ -264,9 +264,9 @@ export function fieldMatches(fieldA: string, fieldB: string): boolean {
     }
   }
   
-  // 清理字段名（移除单位后缀）
-  const cleanedA = cleanFieldName(fieldA).toLowerCase();
-  const cleanedB = cleanFieldName(fieldB).toLowerCase();
+  // 清理字段名（移除单位后缀）- 使用移除了前缀后的名称
+  const cleanedA = cleanFieldName(normalizedA).toLowerCase();
+  const cleanedB = cleanFieldName(normalizedB).toLowerCase();
   
   // 完全匹配（使用清理后的名称）
   if (cleanedA === cleanedB) return true;

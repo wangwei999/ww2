@@ -45,19 +45,21 @@ export class FileParser {
     switch (ext) {
       case '.xlsx':
       case '.xls':
+      case '.et':  // WPS 表格格式，使用 Excel 解析
         tables = this.parseExcel(buffer);
         break;
       case '.csv':
         tables = this.parseCSV(buffer);
         break;
       case '.docx':
+      case '.wps':  // WPS 文档格式，尝试使用 Word 解析
         tables = await this.parseWord(buffer);
         break;
       case '.txt':
         tables = this.parseText(buffer);
         break;
       default:
-        throw new Error(`不支持的文件格式: ${ext}`);
+        throw new Error(`不支持的文件格式: ${ext}。支持的格式包括：.xlsx, .xls, .et, .docx, .wps, .csv, .txt。如果是 .wps 文件，请使用 WPS Office 打开后另存为 .docx 格式再试。`);
     }
     
     // 为每个表格添加单位信息

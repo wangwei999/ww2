@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { writeFile, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import path from 'path';
 import * as XLSX from 'xlsx';
 import { FileParser } from '@/lib/file-parser';
@@ -20,8 +20,27 @@ async function ensureTempDir() {
  * 将表格数据转换为 Excel 格式
  */
 function tableToExcel(table: any): XLSX.WorkSheet {
+  console.log('转换表格到 Excel 格式...');
+  console.log('表格 headers:', table.headers);
+  console.log('表格 rows 数量:', table.rows?.length);
+  
   const { headers, rows } = table;
+  
+  // 验证数据
+  if (!Array.isArray(headers)) {
+    console.error('headers 不是数组:', headers);
+    throw new Error('表格 headers 必须是数组');
+  }
+  
+  if (!Array.isArray(rows)) {
+    console.error('rows 不是数组:', rows);
+    throw new Error('表格 rows 必须是数组');
+  }
+  
   const data = [headers, ...rows];
+  console.log('转换后的数据行数:', data.length);
+  console.log('第一行数据:', data[0]);
+  
   return XLSX.utils.aoa_to_sheet(data);
 }
 
@@ -39,6 +58,11 @@ function sanitizeFilename(filename: string): string {
  * 保存为 Excel 文件
  */
 function saveAsExcel(tables: any[], filename: string): string {
+  console.log('开始保存 Excel 文件...');
+  console.log('原始文件名:', filename);
+  console.log('TEMP_DIR:', TEMP_DIR);
+  console.log('TEMP_DIR 存在:', existsSync(TEMP_DIR));
+  
   const workbook = XLSX.utils.book_new();
   
   tables.forEach((table, index) => {
@@ -50,16 +74,49 @@ function saveAsExcel(tables: any[], filename: string): string {
   const safeFilename = sanitizeFilename(filename);
   const filePath = path.join(TEMP_DIR, safeFilename);
   
+  console.log('安全文件名:', safeFilename);
+  console.log('完整文件路径:', filePath);
+  
   try {
-    XLSX.writeFile(workbook, filePath);
+    // 确保目录存在
+    if (!existsSync(TEMP_DIR)) {
+      console.log('创建 temp 目录...');
+      mkdirSync(TEMP_DIR, { recursive: true });
+    }
+    
+    // 使用 XLSX.write 生成 buffer，然后用 writeFileSync 写入
+    console.log('生成 Excel buffer...');
+    const buffer = XLSX.write(workbook, { 
+      type: 'buffer', 
+      bookType: 'xlsx' 
+    });
+    
+    console.log('写入文件...');
+    writeFileSync(filePath, buffer);
+    
+    console.log('文件保存成功');
     return safeFilename;
   } catch (error) {
-    console.error('保存文件失败:', error);
+    console.error('保存文件失败，错误详情:', error);
+    
     // 如果失败，使用时间戳作为文件名
     const fallbackFilename = `${Date.now()}.xlsx`;
     const fallbackPath = path.join(TEMP_DIR, fallbackFilename);
-    XLSX.writeFile(workbook, fallbackPath);
-    return fallbackFilename;
+    
+    console.log('尝试使用备用文件名:', fallbackFilename);
+    
+    try {
+      const buffer = XLSX.write(workbook, { 
+        type: 'buffer', 
+        bookType: 'xlsx' 
+      });
+      writeFileSync(fallbackPath, buffer);
+      console.log('备用文件保存成功');
+      return fallbackFilename;
+    } catch (fallbackError) {
+      console.error('备用文件保存也失败:', fallbackError);
+      throw new Error(`无法保存文件: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+    }
   }
 }
 
@@ -132,9 +189,27 @@ export async function POST(request: NextRequest) {
     // 提取填充后的表格
     const filledTables = results.map(r => r.filledTable);
     
+    console.log('准备保存表格，数量:', filledTables.length);
+    
+    // 打印第一个表格的详细信息
+    if (filledTables.length > 0) {
+      console.log('第一个表格 headers:', filledTables[0].headers);
+      console.log('第一个表格 rows 数量:', filledTables[0].rows?.length);
+      if (filledTables[0].rows && filledTables[0].rows.length > 0) {
+        console.log('第一个表格第一行数据:', filledTables[0].rows[0]);
+      }
+    }
+    
+    // 验证表格数据
+    if (filledTables.length === 0) {
+      throw new Error('没有可保存的表格数据');
+    }
+    
     // 保存结果
     const originalFilename = fileB.name.replace(/\.[^/.]+$/, ""); // 移除扩展名
     const fileId = `${Date.now()}_${originalFilename}.xlsx`;
+    console.log('生成的文件ID:', fileId);
+    
     const savedFilename = saveAsExcel(filledTables, fileId);
     
     console.log('文件保存成功:', savedFilename);

@@ -222,7 +222,10 @@ export function convertUnit(
  * 检查单元格是否为空
  */
 export function isCellEmpty(cell: TableCell): boolean {
-  return cell === null || cell === undefined || cell === '';
+  if (cell === null || cell === undefined) return true;
+  if (typeof cell === 'string' && cell.trim() === '') return true;
+  if (cell === '') return true;
+  return false;
 }
 
 /**

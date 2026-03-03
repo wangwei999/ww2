@@ -294,44 +294,36 @@ export class FileParser {
     // 使用检测到的表头行
     let headers = cleanedData[headerRowIndex].map(h => String(h || ''));
     
-    // 过滤掉单位列（如"单位：万元 %"）和空值
-    headers = headers.filter(h => {
-      // 如果是单位信息，则过滤掉
+    // 找出单位列的索引（表头中包含"单位"关键字的列）
+    const unitColIndices: number[] = [];
+    headers.forEach((h, idx) => {
       if (/单位[:：]/.test(h)) {
-        return false;
+        unitColIndices.push(idx);
       }
-      // 保留有效的时间点
-      return h !== '' && h !== null && h !== undefined;
     });
+    
+    // 过滤掉单位列
+    const filteredHeaders = headers.filter((_, idx) => !unitColIndices.includes(idx));
     
     const rows = cleanedData.slice(headerRowIndex + 1);
     
-    // 确保每行的列数与表头一致
+    // 确保每行的列数与过滤后的表头一致
     const filteredRows = rows.map(row => {
-      // 根据表头的数量，过滤掉对应的列（跳过单位列）
-      const filteredRow = [];
-      let headerColIndex = 0;
-      for (let i = 0; i < row.length && headerColIndex < headers.length; i++) {
-        const originalHeader = cleanedData[headerRowIndex][i];
-        // 如果这一列是单位信息，跳过
-        if (originalHeader && /单位[:：]/.test(String(originalHeader))) {
-          continue;
-        }
-        filteredRow.push(row[i]);
-        headerColIndex++;
-      }
-      return filteredRow;
+      // 跳过单位列，只保留数据列
+      return row.filter((_, idx) => !unitColIndices.includes(idx));
     });
     
     console.log('createTableFromRawData - 原始数据行数:', data.length);
     console.log('createTableFromRawData - 过滤后行数:', cleanedData.length);
     console.log('createTableFromRawData - 表头行索引:', headerRowIndex);
-    console.log('createTableFromRawData - 表头列数:', headers.length);
+    console.log('createTableFromRawData - 原始表头列数:', headers.length);
+    console.log('createTableFromRawData - 过滤后表头列数:', filteredHeaders.length);
+    console.log('createTableFromRawData - 单位列索引:', unitColIndices);
     console.log('createTableFromRawData - 数据行数:', filteredRows.length);
-    console.log('createTableFromRawData - 表头内容:', headers.slice(0, 10));
+    console.log('createTableFromRawData - 表头内容:', filteredHeaders.slice(0, 10));
     
     return {
-      headers,
+      headers: filteredHeaders,
       rows: filteredRows,
     };
   }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -17,8 +17,17 @@ interface FileUploadProps {
 }
 
 function FileUpload({ label, description, file, onFileChange, acceptedTypes }: FileUploadProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  
+  const handleClick = () => {
+    inputRef.current?.click();
+  };
+  
   const handleDelete = () => {
     onFileChange(null);
+    if (inputRef.current) {
+      inputRef.current.value = '';
+    }
   };
 
   return (
@@ -30,23 +39,11 @@ function FileUpload({ label, description, file, onFileChange, acceptedTypes }: F
         </div>
         
         <div className="flex items-center gap-4">
-          <div className="flex-1">
-            <Input
-              key={file?.name || 'empty'} // 添加key强制重新渲染
-              type="file"
-              accept={acceptedTypes}
-              onChange={(e) => onFileChange(e.target.files?.[0] || null)}
-              className="cursor-pointer"
-              disabled={!!file}
-              placeholder="" // 隐藏"未选择文件"提示
-            />
-          </div>
-          
-          {file && (
-            <div className="flex items-center gap-3 text-sm">
-              <div className="flex items-center gap-2 text-green-600 bg-green-50 dark:bg-green-950/20 px-3 py-1.5 rounded-md">
+          {file ? (
+            <div className="flex-1 flex items-center gap-3">
+              <div className="flex-1 flex items-center gap-2 text-sm text-green-600 bg-green-50 dark:bg-green-950/20 px-3 py-1.5 rounded-md">
                 <CheckCircle className="h-4 w-4" />
-                <span className="max-w-[200px] truncate">{file.name}</span>
+                <span className="max-w-[300px] truncate">{file.name}</span>
               </div>
               <Button
                 type="button"
@@ -58,6 +55,25 @@ function FileUpload({ label, description, file, onFileChange, acceptedTypes }: F
               >
                 <X className="h-4 w-4" />
               </Button>
+            </div>
+          ) : (
+            <div className="flex-1">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleClick}
+                className="w-full h-9 justify-start text-left px-3"
+              >
+                <Upload className="mr-2 h-4 w-4" />
+                <span className="text-muted-foreground">选择文件</span>
+              </Button>
+              <input
+                ref={inputRef}
+                type="file"
+                accept={acceptedTypes}
+                onChange={(e) => onFileChange(e.target.files?.[0] || null)}
+                className="hidden"
+              />
             </div>
           )}
         </div>

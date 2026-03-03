@@ -80,8 +80,7 @@ export class FileParser {
       const rawData = XLSX.utils.sheet_to_json<TableCell[]>(worksheet, { 
         header: 1,
         defval: null,
-        raw: false,  // 不使用原始值，使用格式化后的值
-        dateNF: 'yyyy-mm-dd'  // 日期格式
+        raw: true,  // 使用原始值（日期序列号），不自动转换
       });
       
       if (rawData.length > 0) {

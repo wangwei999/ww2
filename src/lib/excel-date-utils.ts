@@ -1,7 +1,10 @@
 /**
  * 将Excel日期序列号转换为日期字符串
+ * 支持多种格式：
+ * - YYYY-MM-DD: 2025-09-30
+ * - YYYY/M/D: 2025/9/30 (用户期望格式)
  */
-export function excelDateToString(excelDate: number): string | null {
+export function excelDateToString(excelDate: number, format: 'YYYY-MM-DD' | 'YYYY/M/D' = 'YYYY-MM-DD'): string | null {
   if (typeof excelDate !== 'number' || isNaN(excelDate)) {
     return null;
   }
@@ -13,10 +16,14 @@ export function excelDateToString(excelDate: number): string | null {
   const date = new Date(excelEpoch.getTime() + daysToAdd * 24 * 60 * 60 * 1000);
   
   const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
   
-  return `${year}-${month}-${day}`;
+  if (format === 'YYYY/M/D') {
+    return `${year}/${month}/${day}`;
+  } else {
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
 }
 
 /**
@@ -34,9 +41,9 @@ export function isExcelDate(value: any): boolean {
 /**
  * 转换单元格值，如果是Excel日期序列号则转换为日期字符串
  */
-export function convertExcelValue(value: any): any {
+export function convertExcelValue(value: any, format: 'YYYY-MM-DD' | 'YYYY/M/D' = 'YYYY-MM-DD'): any {
   if (isExcelDate(value)) {
-    return excelDateToString(value);
+    return excelDateToString(value, format);
   }
   return value;
 }

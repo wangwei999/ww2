@@ -5,6 +5,7 @@ import path from 'path';
 import * as XLSX from 'xlsx';
 import { FileParser } from '@/lib/file-parser';
 import { BatchDataMatcher } from '@/lib/data-matcher';
+import { excelDateToString, isExcelDate } from '@/lib/excel-date-utils';
 
 // 临时文件存储目录
 const TEMP_DIR = path.join(process.cwd(), 'temp');
@@ -37,7 +38,28 @@ function tableToExcel(table: any): XLSX.WorkSheet {
     throw new Error('表格 rows 必须是数组');
   }
   
-  const data = [headers, ...rows];
+  // 转换表头中的日期为用户期望的格式 (YYYY/M/D)
+  const convertedHeaders = headers.map((header: any) => {
+    // 检查是否是日期序列号
+    if (isExcelDate(header)) {
+      const dateString = excelDateToString(header, 'YYYY/M/D');
+      console.log(`转换表头日期序列号: ${header} -> ${dateString}`);
+      return dateString;
+    }
+    
+    // 检查是否是 YYYY-MM-DD 格式的日期字符串
+    if (typeof header === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(header)) {
+      const [year, month, day] = header.split('-');
+      // 移除月份和日期的前导零
+      const formattedDate = `${year}/${parseInt(month)}/${parseInt(day)}`;
+      console.log(`转换表头日期格式: ${header} -> ${formattedDate}`);
+      return formattedDate;
+    }
+    
+    return header;
+  });
+  
+  const data = [convertedHeaders, ...rows];
   console.log('转换后的数据行数:', data.length);
   console.log('第一行数据:', data[0]);
   

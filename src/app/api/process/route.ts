@@ -262,6 +262,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '文件B中未找到表格数据' }, { status: 400 });
     }
     
+    // 智能选择文件B的表格
+    // 检测文件A第一个表格的方向
+    const directionA = FileParser.detectTableDirection(parseResultA.tables[0]);
+    console.log('文件A表格方向:', directionA);
+    
+    // 如果文件B有多个表格，选择方向匹配的表格
+    let selectedTableB: any;
+    if (parseResultB.tables.length > 1) {
+      console.log('文件B有多个表格，开始智能选择...');
+      selectedTableB = FileParser.selectBestTable(parseResultB.tables, directionA);
+      if (!selectedTableB) {
+        return NextResponse.json({ error: '无法选择合适的文件B表格' }, { status: 400 });
+      }
+    } else {
+      selectedTableB = parseResultB.tables[0];
+    }
+    
+    const selectedTablesB = [selectedTableB];
+    console.log('最终选择的文件B表格表头:', selectedTableB.headers);
+    console.log('最终选择的文件B表格行数:', selectedTableB.rows.length);
+    
     // 批量匹配
     // 根据需求：如果文件B包含"单位：万元 %"字样，则保持原始格式（不进行单位转换和百分比格式化）
     const keepOriginalFormat = parseResultB.keepOriginalFormat || false;
@@ -273,11 +294,11 @@ export async function POST(request: NextRequest) {
     
     const matcher = new BatchDataMatcher(
       parseResultA.tables,
-      parseResultB.tables,
+      selectedTablesB,  // 使用选择的表格
       parseResultA.unit || '万元',  // 源文件默认为万元
       keepOriginalFormat ? '万元' : '亿元',  // 如果保持原始格式，则输出为万元，否则为亿元
       parseResultA.tables[0]?.hasPercentage,
-      parseResultB.tables[0]?.hasPercentage
+      selectedTableB?.hasPercentage
     );
     
     console.log('开始数据匹配...');

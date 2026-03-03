@@ -158,6 +158,94 @@ export class FileParser {
   }
   
   /**
+   * 检测表格方向
+   * 横向：第一行是表头（指标名称），第一列是序号/行号
+   * 纵向：第一列是表头（指标名称），第一行是数据（如公司名称）
+   */
+  static detectTableDirection(table: TableData): 'horizontal' | 'vertical' {
+    if (!table.headers || table.headers.length < 2 || !table.rows || table.rows.length < 1) {
+      return 'horizontal'; // 默认横向
+    }
+
+    const headerCount = table.headers.length;
+    const rowCount = table.rows.length;
+    
+    // 方法1：检查表头中是否包含日期/时间关键词
+    const dateKeywords = ['2024', '2025', '2023', '2022', '年', '月', '季度', 'Q1', 'Q2', 'Q3', 'Q4'];
+    const headerDateCount = table.headers.filter(h => 
+      h && dateKeywords.some(k => String(h).includes(k))
+    ).length;
+    
+    const rowDateCount = table.rows[0].filter(cell => 
+      cell && dateKeywords.some(k => String(cell).includes(k))
+    ).length;
+    
+    // 如果表头中有较多日期，可能是横向表格（表头是时间点）
+    if (headerDateCount > 0 && headerDateCount > rowDateCount) {
+      return 'horizontal';
+    }
+  
+    // 方法2：检查第一行数据中是否包含指标名称关键词
+    const indicatorKeywords = ['率', '比例', '金额', '余额', '比率', '收入', '利润', '资产'];
+    const headerIndicatorCount = table.headers.filter(h => 
+      h && indicatorKeywords.some(k => String(h).includes(k))
+    ).length;
+    
+    // 如果表头中有指标关键词，可能是纵向表格
+    if (headerIndicatorCount > 0) {
+      return 'vertical';
+    }
+  
+    // 方法3：基于比例判断
+    // 横向表格：列数远大于行数（表头是时间点，行是指标）
+    // 纵向表格：行数远大于列数（列是时间点，行是指标）
+    if (headerCount >= 4 && rowCount > 1) {
+      return 'horizontal';
+    }
+  
+    // 默认返回横向
+    return 'horizontal';
+  }
+
+  /**
+   * 根据目标表格方向，从表格列表中选择最合适的表格
+   */
+  static selectBestTable(tables: TableData[], targetDirection: 'horizontal' | 'vertical'): TableData | null {
+    if (tables.length === 0) return null;
+    if (tables.length === 1) return tables[0];
+    
+    // 检测每个表格的方向
+    const tablesWithDirection = tables.map(t => ({
+      table: t,
+      direction: this.detectTableDirection(t)
+    }));
+    
+    console.log('表格方向检测结果:');
+    tablesWithDirection.forEach((item, index) => {
+      console.log(`  表格${index + 1}: ${item.direction}, 列数: ${item.table.headers?.length}, 行数: ${item.table.rows?.length}`);
+    });
+    
+    // 优先选择方向匹配的表格
+    const matched = tablesWithDirection.filter(t => t.direction === targetDirection);
+    
+    if (matched.length === 1) {
+      console.log(`找到方向匹配的表格: 表格${tablesWithDirection.indexOf(matched[0]) + 1}`);
+      return matched[0].table;
+    }
+    
+    if (matched.length > 1) {
+      console.log(`找到多个方向匹配的表格，选择列数最多的`);
+      matched.sort((a, b) => (b.table.headers?.length || 0) - (a.table.headers?.length || 0));
+      return matched[0].table;
+    }
+    
+    // 如果没有方向匹配的，选择列数最多的表格
+    console.log('没有方向完全匹配的表格，选择列数最多的');
+    tablesWithDirection.sort((a, b) => (b.table.headers?.length || 0) - (a.table.headers?.length || 0));
+    return tablesWithDirection[0].table;
+  }
+  
+  /**
    * 解析 Word 文件
    */
   private static async parseWord(buffer: Buffer): Promise<TableData[]> {

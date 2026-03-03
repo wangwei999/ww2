@@ -26,6 +26,16 @@ function tableToExcel(table: any): XLSX.WorkSheet {
 }
 
 /**
+ * 清理文件名，移除特殊字符
+ */
+function sanitizeFilename(filename: string): string {
+  return filename
+    .replace(/[\\/:*?"<>|()]/g, '_')  // 替换特殊字符
+    .replace(/\s+/g, '_')              // 替换空格
+    .substring(0, 100);                // 限制长度
+}
+
+/**
  * 保存为 Excel 文件
  */
 function saveAsExcel(tables: any[], filename: string): string {
@@ -36,10 +46,21 @@ function saveAsExcel(tables: any[], filename: string): string {
     XLSX.utils.book_append_sheet(workbook, worksheet, `Sheet${index + 1}`);
   });
   
-  const filePath = path.join(TEMP_DIR, filename);
-  XLSX.writeFile(workbook, filePath);
+  // 清理文件名
+  const safeFilename = sanitizeFilename(filename);
+  const filePath = path.join(TEMP_DIR, safeFilename);
   
-  return filePath;
+  try {
+    XLSX.writeFile(workbook, filePath);
+    return safeFilename;
+  } catch (error) {
+    console.error('保存文件失败:', error);
+    // 如果失败，使用时间戳作为文件名
+    const fallbackFilename = `${Date.now()}.xlsx`;
+    const fallbackPath = path.join(TEMP_DIR, fallbackFilename);
+    XLSX.writeFile(workbook, fallbackPath);
+    return fallbackFilename;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -66,6 +87,16 @@ export async function POST(request: NextRequest) {
     console.log('文件B解析完成，找到表格数:', parseResultB.tables.length);
     console.log('文件A单位:', parseResultA.unit);
     console.log('文件B单位:', parseResultB.unit);
+    
+    // 打印表格结构信息
+    if (parseResultA.tables.length > 0) {
+      console.log('文件A第一个表格表头:', parseResultA.tables[0].headers);
+      console.log('文件A第一个表格行数:', parseResultA.tables[0].rows.length);
+    }
+    if (parseResultB.tables.length > 0) {
+      console.log('文件B第一个表格表头:', parseResultB.tables[0].headers);
+      console.log('文件B第一个表格行数:', parseResultB.tables[0].rows.length);
+    }
     
     if (parseResultA.tables.length === 0) {
       return NextResponse.json({ error: '文件A中未找到表格数据' }, { status: 400 });
@@ -102,14 +133,15 @@ export async function POST(request: NextRequest) {
     const filledTables = results.map(r => r.filledTable);
     
     // 保存结果
-    const fileId = `${Date.now()}_${fileB.name}`;
-    const outputPath = saveAsExcel(filledTables, fileId);
+    const originalFilename = fileB.name.replace(/\.[^/.]+$/, ""); // 移除扩展名
+    const fileId = `${Date.now()}_${originalFilename}.xlsx`;
+    const savedFilename = saveAsExcel(filledTables, fileId);
     
-    console.log('文件保存成功:', outputPath);
+    console.log('文件保存成功:', savedFilename);
     
     return NextResponse.json({ 
       success: true, 
-      fileId,
+      fileId: savedFilename,
       message: '处理完成',
       statistics: {
         totalFilled,

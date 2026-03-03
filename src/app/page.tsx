@@ -81,20 +81,32 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        throw new Error('处理失败');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || '处理失败');
       }
 
       const data = await response.json();
-      toast.success('数据处理完成！');
+      console.log('处理结果:', data);
+      
+      if (!data.success) {
+        throw new Error(data.message || '处理失败');
+      }
+      
+      if (!data.fileId) {
+        throw new Error('未获取到文件ID');
+      }
       
       // 保存文件ID以便后续下载
-      if (data.fileId && typeof window !== 'undefined') {
+      if (typeof window !== 'undefined') {
         sessionStorage.setItem('processedFileId', data.fileId);
         setHasProcessedFile(true);
       }
+      
+      toast.success(`数据处理完成！共填充 ${data.statistics?.totalFilled || 0} 个单元格`);
     } catch (error) {
-      toast.error('处理失败，请重试');
-      console.error(error);
+      const errorMessage = error instanceof Error ? error.message : '处理失败，请重试';
+      toast.error(errorMessage);
+      console.error('处理错误:', error);
     } finally {
       setProcessing(false);
     }
@@ -199,25 +211,37 @@ export default function Home() {
             )}
           </Button>
 
-          <Button
-            onClick={handleDownload}
-            disabled={downloading || !hasProcessedFile}
-            variant="outline"
-            size="lg"
-            className="min-w-[180px]"
-          >
-            {downloading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                下载中...
-              </>
-            ) : (
-              <>
-                <Download className="mr-2 h-4 w-4" />
-                下载结果
-              </>
+          <div className="flex flex-col items-center gap-2">
+            <Button
+              onClick={handleDownload}
+              disabled={downloading || !hasProcessedFile}
+              variant="outline"
+              size="lg"
+              className="min-w-[180px]"
+            >
+              {downloading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  下载中...
+                </>
+              ) : hasProcessedFile ? (
+                <>
+                  <Download className="mr-2 h-4 w-4" />
+                  下载结果
+                </>
+              ) : (
+                <>
+                  <Download className="mr-2 h-4 w-4" />
+                  等待处理
+                </>
+              )}
+            </Button>
+            {!hasProcessedFile && (
+              <p className="text-xs text-muted-foreground">
+                请先上传文件并点击"开始处理"
+              </p>
             )}
-          </Button>
+          </div>
         </div>
 
         {/* 注意事项 */}

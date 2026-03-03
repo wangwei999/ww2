@@ -7,6 +7,7 @@ import {
   parseNumberCell,
   isCellEmpty,
 } from './data-utils';
+import { excelDateToString, isExcelDate } from './excel-date-utils';
 
 /**
  * 智能数据匹配器
@@ -112,17 +113,31 @@ export class DataMatcher {
    */
   private extractTimePointsFromRow(headers: string[]): Map<number, string> {
     const timePoints = new Map<number, string>();
-    
+
     console.log('开始提取时间点，表头列数:', headers.length);
     for (let i = 0; i < headers.length; i++) {
       const header = headers[i];
-      const normalized = normalizeDate(String(header));
-      if (header && normalized !== String(header)) {
+      let normalized: string | null = null;
+
+      // 1. 检查是否是 Excel 日期序列号
+      if (typeof header === 'number' && isExcelDate(header)) {
+        normalized = excelDateToString(header, 'YYYY-MM-DD', false); // 不调整到底
+        console.log(`列${i} 检测到 Excel 日期序列号 ${header} -> ${normalized}`);
+      } else if (header) {
+        // 2. 检查是否是文本日期
+        normalized = normalizeDate(String(header));
+        if (normalized !== String(header)) {
+          console.log(`列${i} 检测到文本日期 ${header} -> ${normalized}`);
+        }
+      }
+
+      if (normalized && header && normalized !== String(header)) {
         timePoints.set(i, normalized);
       }
     }
-    
+
     console.log('提取到的时间点数量:', timePoints.size);
+    console.log('时间点详情:', Array.from(timePoints.entries()));
     return timePoints;
   }
   

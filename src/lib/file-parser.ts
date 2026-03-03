@@ -29,6 +29,13 @@ export class FileParser {
     // 检测是否包含"单位：万元 %"字样，如果是，则保持原始格式（不进行单位转换和百分比格式化）
     const keepOriginalFormat = textSample.includes('单位：万元 %') || textSample.includes('单位: 万元 %');
     
+    console.log('=== 文件解析检测 ===');
+    console.log('文件名:', file.name);
+    console.log('文本样本长度:', textSample.length);
+    console.log('包含"单位：万元 %"?', textSample.includes('单位：万元 %'));
+    console.log('包含"单位: 万元 %"?', textSample.includes('单位: 万元 %'));
+    console.log('keepOriginalFormat:', keepOriginalFormat);
+    
     let tables: TableData[] = [];
     
     switch (ext) {

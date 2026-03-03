@@ -269,10 +269,8 @@ export function fieldMatches(fieldA: string, fieldB: string): boolean {
   // 完全匹配（使用清理后的名称）
   if (cleanedA === cleanedB) return true;
   
-  // 包含关系（使用清理后的名称）
-  if (cleanedA.includes(cleanedB) || cleanedB.includes(cleanedA)) {
-    return true;
-  }
+  // 移除包含关系的匹配，避免不同指标被错误匹配
+  // 例如："资本充足率"、"一级资本充足率"、"核心资本充足率"是不同指标，不应匹配
   
   // 检查同义词（使用清理后的名称）
   for (const [key, synonyms] of Object.entries(SYNONYMS)) {

@@ -52,6 +52,10 @@ const SYNONYMS: Record<string, string[]> = {
   '总资产周转率': ['资产周转率'],
   '贷款总额': ['贷款额', '贷款金额', '贷款'],
   '客户存款': ['存款', '客户资金'],
+  '不良贷款率': ['不良资产率', '不良资产占比'],
+  '流动性覆盖率': ['流动性覆盖率!'], // 去除感叹号
+  '净稳定资金比例': ['净稳定资金比例!'], // 去除感叹号
+  '优质流动性资产充足率': ['优质流动性资产充足率!'], // 去除感叹号
   // 可以继续添加更多同义词
 };
 
@@ -211,6 +215,24 @@ export function parseDate(dateStr: string): NormalizedDate | null {
 }
 
 /**
+ * 清理字段名，移除单位、括号等后缀
+ */
+function cleanFieldName(fieldName: string): string {
+  let cleaned = fieldName.trim();
+  
+  // 移除单位后缀（如"（亿元）"、"（%）"、"(%)"等）
+  cleaned = cleaned.replace(/[（\(][^\)）]*[）\)]/g, '');
+  
+  // 移除末尾的单位（如"亿元"、"万元"、"元"等）
+  cleaned = cleaned.replace(/(?:亿元|万元|千元|百元|元|元)%?$/g, '');
+  
+  // 移除末尾的百分号
+  cleaned = cleaned.replace(/%$/g, '');
+  
+  return cleaned.trim();
+}
+
+/**
  * 检查两个字段是否匹配（支持同义词和前缀忽略）
  */
 export function fieldMatches(fieldA: string, fieldB: string): boolean {
@@ -230,18 +252,22 @@ export function fieldMatches(fieldA: string, fieldB: string): boolean {
     }
   }
   
-  // 完全匹配
-  if (normalizedA === normalizedB) return true;
+  // 清理字段名（移除单位后缀）
+  const cleanedA = cleanFieldName(fieldA).toLowerCase();
+  const cleanedB = cleanFieldName(fieldB).toLowerCase();
   
-  // 包含关系
-  if (normalizedA.includes(normalizedB) || normalizedB.includes(normalizedA)) {
+  // 完全匹配（使用清理后的名称）
+  if (cleanedA === cleanedB) return true;
+  
+  // 包含关系（使用清理后的名称）
+  if (cleanedA.includes(cleanedB) || cleanedB.includes(cleanedA)) {
     return true;
   }
   
-  // 检查同义词
+  // 检查同义词（使用清理后的名称）
   for (const [key, synonyms] of Object.entries(SYNONYMS)) {
-    const group = [key, ...synonyms].map(s => s.toLowerCase());
-    if (group.includes(normalizedA) && group.includes(normalizedB)) {
+    const group = [key, ...synonyms].map(s => cleanFieldName(s).toLowerCase());
+    if (group.includes(cleanedA) && group.includes(cleanedB)) {
       return true;
     }
   }

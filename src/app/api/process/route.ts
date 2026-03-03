@@ -65,7 +65,18 @@ function tableToExcel(table: any): XLSX.WorkSheet {
   console.log('转换后的数据行数:', data.length);
   console.log('第一行数据:', data[0]);
   
-  return XLSX.utils.aoa_to_sheet(data);
+  const worksheet = XLSX.utils.aoa_to_sheet(data);
+  
+  // 确保数值单元格的数据类型是数字（防止被误认为是日期）
+  Object.keys(worksheet).forEach(cellRef => {
+    if (cellRef.startsWith('!')) return; // 跳过元数据
+    const cell = worksheet[cellRef];
+    if (cell && typeof cell.v === 'number') {
+      cell.t = 'n'; // 设置为数字类型
+    }
+  });
+  
+  return worksheet;
 }
 
 /**

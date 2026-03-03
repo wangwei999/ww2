@@ -121,8 +121,12 @@ export class DataMatcher {
 
       // 1. 检查是否是 Excel 日期序列号
       if (typeof header === 'number' && isExcelDate(header)) {
-        normalized = excelDateToString(header, 'YYYY-MM-DD', false); // 不调整到底
-        console.log(`列${i} 检测到 Excel 日期序列号 ${header} -> ${normalized}`);
+        const fullDate = excelDateToString(header, 'YYYY-MM-DD', false);
+        if (fullDate) {
+          // 只保留年月部分（去掉日期）
+          normalized = fullDate.substring(0, 7); // YYYY-MM
+          console.log(`列${i} 检测到 Excel 日期序列号 ${header} -> ${fullDate} -> ${normalized}`);
+        }
       } else if (header) {
         // 2. 检查是否是文本日期
         normalized = normalizeDate(String(header));

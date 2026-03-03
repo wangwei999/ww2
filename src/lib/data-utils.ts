@@ -8,6 +8,7 @@ const DATE_PATTERNS = [
   { pattern: /(\d{4})年末/, format: 'YEAR_END' },                        // 2025年末
   { pattern: /(\d{4})年(\d{1,2})月底/, format: 'MONTH_END_CN' },         // 2025年9月底
   { pattern: /(\d{4})年(\d{1,2})月末/, format: 'MONTH_END_CN' },         // 2025年9月末
+  { pattern: /(\d{4})年/, format: 'YEAR_ONLY' },                          // 2025年, 2021年
   { pattern: /(\d{4})(\d{2})/, format: 'YM_COMPACT' },                   // 202509
   { pattern: /(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/, format: 'YMD' }, // 2025/9/15
   { pattern: /(\d{4})年(\d{1,2})月(\d{1,2})日/, format: 'YMD_CN' },        // 2025年9月15日
@@ -91,6 +92,10 @@ export function normalizeDate(dateStr: string): string {
       } else if (format === 'MONTH_END_CN') {
         year = match[1];
         month = match[2].padStart(2, '0');
+      } else if (format === 'YEAR_ONLY') {
+        // 只包含年份，如"2021年"
+        year = match[1];
+        month = '12'; // 默认年底
       } else if (format === 'YM_COMPACT') {
         year = match[1];
         month = match[2];

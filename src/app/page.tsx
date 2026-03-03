@@ -80,6 +80,8 @@ export default function Home() {
   }, []);
 
   const handleProcess = async () => {
+    console.log('开始处理 - fileA:', fileA?.name, 'fileB:', fileB?.name);
+    
     if (!fileA || !fileB) {
       toast.error('请上传两个文件');
       return;
@@ -206,6 +208,19 @@ export default function Home() {
             acceptedTypes=".xlsx,.xls,.docx,.doc"
           />
         </div>
+
+        {/* 调试信息（仅在开发环境显示） */}
+        {process.env.NODE_ENV === 'development' && (
+          <Card className="p-4 bg-blue-50 dark:bg-blue-950/20">
+            <h4 className="text-sm font-semibold mb-2">调试信息</h4>
+            <div className="text-xs space-y-1 font-mono">
+              <p>文件A: {fileA ? `${fileA.name} (${fileA.size} bytes)` : '未上传'}</p>
+              <p>文件B: {fileB ? `${fileB.name} (${fileB.size} bytes)` : '未上传'}</p>
+              <p>按钮禁用状态: {processing || !fileA || !fileB ? '是' : '否'}</p>
+              <p>处理中: {processing ? '是' : '否'}</p>
+            </div>
+          </Card>
+        )}
 
         {/* 操作按钮 */}
         <div className="flex gap-4 justify-center">

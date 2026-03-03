@@ -22,12 +22,16 @@ export class FileParser {
     const buffer = Buffer.from(bytes);
     const ext = this.getFileExtension(file.name);
     
-    // 从文件内容中提取单位信息
-    const textSample = buffer.toString('utf-8', 0, Math.min(3000, buffer.length));
+    // 从文件内容中提取单位信息，增加采样范围以检测文件后面的标记
+    const textSample = buffer.toString('utf-8', 0, Math.min(15000, buffer.length));
     const unitInfo = extractUnitInfo(textSample);
     
     // 检测是否包含"单位：万元 %"字样，如果是，则保持原始格式（不进行单位转换和百分比格式化）
-    const keepOriginalFormat = textSample.includes('单位：万元 %') || textSample.includes('单位: 万元 %');
+    // 支持多种格式："单位：万元 %"、"单位: 万元 %"、"单位：万元%"、"单位: 万元%"
+    let keepOriginalFormat = textSample.includes('单位：万元 %') || 
+                           textSample.includes('单位: 万元 %') ||
+                           textSample.includes('单位：万元%') ||
+                           textSample.includes('单位: 万元%');
     
     console.log('=== 文件解析检测 ===');
     console.log('文件名:', file.name);

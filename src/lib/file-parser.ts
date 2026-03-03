@@ -35,6 +35,7 @@ export class FileParser {
     
     console.log('=== 文件解析检测 ===');
     console.log('文件名:', file.name);
+    console.log('文件扩展名:', ext);
     console.log('文本样本长度:', textSample.length);
     console.log('包含"单位：万元 %"?', textSample.includes('单位：万元 %'));
     console.log('包含"单位: 万元 %"?', textSample.includes('单位: 万元 %'));
@@ -62,12 +63,20 @@ export class FileParser {
         throw new Error(`不支持的文件格式: ${ext}。支持的格式包括：.xlsx, .xls, .et, .docx, .wps, .csv, .txt。如果是 .wps 文件，请使用 WPS Office 打开后另存为 .docx 格式再试。`);
     }
     
+    console.log('parseFile - 解析完成，表格数量:', tables.length);
+    if (tables.length > 0) {
+      console.log('parseFile - 第一个表格 headers:', tables[0].headers);
+      console.log('parseFile - 第一个表格 rows 数量:', tables[0].rows.length);
+    }
+    
     // 为每个表格添加单位信息
     tables = tables.map(table => ({
       ...table,
       unit: table.unit || unitInfo?.unit,
       hasPercentage: table.hasPercentage || unitInfo?.hasPercentage,
     }));
+    
+    console.log('parseFile - 添加单位信息后，表格数量:', tables.length);
     
     return {
       tables,
@@ -91,8 +100,11 @@ export class FileParser {
     const workbook = XLSX.read(buffer);
     const tables: TableData[] = [];
     
+    console.log('parseExcel - 工作表数量:', workbook.SheetNames.length);
+    
     // 遍历所有工作表
     for (const sheetName of workbook.SheetNames) {
+      console.log('parseExcel - 处理工作表:', sheetName);
       const worksheet = workbook.Sheets[sheetName];
       const rawData = XLSX.utils.sheet_to_json<TableCell[]>(worksheet, { 
         header: 1,
@@ -100,17 +112,23 @@ export class FileParser {
         raw: true,  // 使用原始值（日期序列号），不自动转换
       });
       
+      console.log('parseExcel - 原始数据行数:', rawData.length);
+      
       if (rawData.length > 0) {
         // 转换Excel日期序列号
         const convertedData = rawData.map(row => 
           row.map(cell => convertExcelValue(cell))
         );
         
+        console.log('parseExcel - 转换后数据行数:', convertedData.length);
+        
         const tablesInSheet = this.extractTablesFromRawData(convertedData);
+        console.log('parseExcel - 从工作表提取的表格数:', tablesInSheet.length);
         tables.push(...tablesInSheet);
       }
     }
     
+    console.log('parseExcel - 总共返回表格数:', tables.length);
     return tables;
   }
   
@@ -118,16 +136,23 @@ export class FileParser {
    * 解析 CSV 文件
    */
   private static parseCSV(buffer: Buffer): TableData[] {
+    console.log('parseCSV - 开始解析 CSV 文件');
     const text = buffer.toString('utf-8');
+    console.log('parseCSV - 文本长度:', text.length);
     const result = Papa.parse<TableCell[]>(text, {
       header: false,
       skipEmptyLines: false,
     });
     
+    console.log('parseCSV - 解析结果行数:', result.data.length);
+    
     if (result.data.length > 0) {
-      return this.extractTablesFromRawData(result.data);
+      const tables = this.extractTablesFromRawData(result.data);
+      console.log('parseCSV - 返回表格数量:', tables.length);
+      return tables;
     }
     
+    console.log('parseCSV - 警告：没有解析到数据');
     return [];
   }
   
@@ -135,26 +160,38 @@ export class FileParser {
    * 解析 Word 文件
    */
   private static async parseWord(buffer: Buffer): Promise<TableData[]> {
+    console.log('parseWord - 开始解析 Word 文件');
     const result = await mammoth.extractRawText({ buffer });
     const text = result.value;
+    
+    console.log('parseWord - 提取的文本长度:', text.length);
     
     // Word 文件中的表格需要特殊处理
     // 这里先简单实现，提取可能包含表格的段落
     const tables: TableData[] = [];
     const lines = text.split('\n').filter(line => line.trim());
     
+    console.log('parseWord - 非空行数:', lines.length);
+    
     // 尝试检测表格行（包含制表符或多个空格分隔）
     const potentialTableRows = lines.filter(line => {
       return line.includes('\t') || line.split(/\s{2,}/).length > 2;
     });
     
+    console.log('parseWord - 检测到的潜在表格行数:', potentialTableRows.length);
+    
     if (potentialTableRows.length > 0) {
+      console.log('parseWord - 前5行潜在表格行:', potentialTableRows.slice(0, 5));
       const tableData = potentialTableRows.map(line => {
         return line.split('\t').map(cell => cell.trim());
       });
       
       tables.push(this.createTableFromRawData(tableData));
+    } else {
+      console.log('parseWord - 警告：没有检测到表格行');
     }
+    
+    console.log('parseWord - 返回表格数量:', tables.length);
     
     return tables;
   }
@@ -163,8 +200,12 @@ export class FileParser {
    * 解析文本文件
    */
   private static parseText(buffer: Buffer): TableData[] {
+    console.log('parseText - 开始解析文本文件');
     const text = buffer.toString('utf-8');
+    console.log('parseText - 文本长度:', text.length);
     const lines = text.split('\n').filter(line => line.trim());
+    
+    console.log('parseText - 非空行数:', lines.length);
     
     // 尝试检测表格结构
     const tables: TableData[] = [];
@@ -184,6 +225,7 @@ export class FileParser {
       } else {
         // 非表格行，保存当前表格
         if (currentTable.length > 1) {
+          console.log('parseText - 保存表格，行数:', currentTable.length);
           tables.push(this.createTableFromRawData(currentTable));
         }
         currentTable = [];
@@ -193,9 +235,11 @@ export class FileParser {
     
     // 保存最后一个表格
     if (currentTable.length > 1) {
+      console.log('parseText - 保存最后一个表格，行数:', currentTable.length);
       tables.push(this.createTableFromRawData(currentTable));
     }
     
+    console.log('parseText - 返回表格数量:', tables.length);
     return tables;
   }
   
@@ -246,9 +290,11 @@ export class FileParser {
     // 添加最后一个表格（即使没有找到数据行，也要保存）
     if (currentTable.length > 0) {
       // 如果只有表头没有数据行，也要保存
+      console.log('extractTablesFromRawData - 保存最后一个表格，行数:', currentTable.length);
       tables.push(this.createTableFromRawData(currentTable));
     }
     
+    console.log('extractTablesFromRawData - 返回表格数量:', tables.length);
     return tables;
   }
   

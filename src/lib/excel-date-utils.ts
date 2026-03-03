@@ -3,8 +3,15 @@
  * 支持多种格式：
  * - YYYY-MM-DD: 2025-09-30
  * - YYYY/M/D: 2025/9/30 (用户期望格式)
+ * @param excelDate Excel日期序列号
+ * @param format 输出格式
+ * @param adjustToMonthEnd 是否自动调整为月底日期（默认false）
  */
-export function excelDateToString(excelDate: number, format: 'YYYY-MM-DD' | 'YYYY/M/D' = 'YYYY-MM-DD'): string | null {
+export function excelDateToString(
+  excelDate: number,
+  format: 'YYYY-MM-DD' | 'YYYY/M/D' = 'YYYY-MM-DD',
+  adjustToMonthEnd: boolean = false
+): string | null {
   if (typeof excelDate !== 'number' || isNaN(excelDate)) {
     return null;
   }
@@ -15,9 +22,15 @@ export function excelDateToString(excelDate: number, format: 'YYYY-MM-DD' | 'YYY
   
   const date = new Date(excelEpoch.getTime() + daysToAdd * 24 * 60 * 60 * 1000);
   
-  const year = date.getFullYear();
-  const month = date.getMonth() + 1;
-  const day = date.getDate();
+  let year = date.getFullYear();
+  let month = date.getMonth() + 1;
+  let day = date.getDate();
+  
+  // 如果需要调整为月底日期
+  if (adjustToMonthEnd) {
+    const lastDay = new Date(year, month, 0).getDate(); // 获取该月的最后一天
+    day = lastDay;
+  }
   
   if (format === 'YYYY/M/D') {
     return `${year}/${month}/${day}`;
@@ -41,9 +54,13 @@ export function isExcelDate(value: any): boolean {
 /**
  * 转换单元格值，如果是Excel日期序列号则转换为日期字符串
  */
-export function convertExcelValue(value: any, format: 'YYYY-MM-DD' | 'YYYY/M/D' = 'YYYY-MM-DD'): any {
+export function convertExcelValue(
+  value: any,
+  format: 'YYYY-MM-DD' | 'YYYY/M/D' = 'YYYY-MM-DD',
+  adjustToMonthEnd: boolean = false
+): any {
   if (isExcelDate(value)) {
-    return excelDateToString(value, format);
+    return excelDateToString(value, format, adjustToMonthEnd);
   }
   return value;
 }

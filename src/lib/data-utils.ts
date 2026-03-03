@@ -16,6 +16,21 @@ const DATE_PATTERNS = [
   { pattern: /([A-Za-z]{3})-(\d{2})/, format: 'MON_YY' },                // Jun-23
 ];
 
+/**
+ * 将日期调整为月底日期
+ * 例如：2023-06-29 -> 2023-06-30（6月的最后一天）
+ */
+export function adjustToMonthEnd(dateStr: string): string {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    return dateStr;
+  }
+  
+  const [year, month] = dateStr.split('-').map(Number);
+  const lastDay = new Date(year, month, 0).getDate(); // 获取该月的最后一天
+  
+  return `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+}
+
 // 扩展的同义词映射
 const SYNONYMS: Record<string, string[]> = {
   '总资产': ['资产总额', '资产合计', '总资', '资产总计', '总资产额'],
@@ -35,6 +50,8 @@ const SYNONYMS: Record<string, string[]> = {
   '营业收入增长率': ['营收增长率', '收入增长率'],
   '净利润增长率': ['净利增长率'],
   '总资产周转率': ['资产周转率'],
+  '贷款总额': ['贷款额', '贷款金额', '贷款'],
+  '客户存款': ['存款', '客户资金'],
   // 可以继续添加更多同义词
 };
 
@@ -194,13 +211,24 @@ export function parseDate(dateStr: string): NormalizedDate | null {
 }
 
 /**
- * 检查两个字段是否匹配（支持同义词）
+ * 检查两个字段是否匹配（支持同义词和前缀忽略）
  */
 export function fieldMatches(fieldA: string, fieldB: string): boolean {
   if (!fieldA || !fieldB) return false;
   
-  const normalizedA = fieldA.trim().toLowerCase();
-  const normalizedB = fieldB.trim().toLowerCase();
+  let normalizedA = fieldA.trim().toLowerCase();
+  let normalizedB = fieldB.trim().toLowerCase();
+  
+  // 移除常见的前缀（如"其中："、"其中"）
+  const prefixes = ['其中：', '其中', '包括：', '包括', '含：', '含'];
+  for (const prefix of prefixes) {
+    if (normalizedA.startsWith(prefix)) {
+      normalizedA = normalizedA.substring(prefix.length).trim();
+    }
+    if (normalizedB.startsWith(prefix)) {
+      normalizedB = normalizedB.substring(prefix.length).trim();
+    }
+  }
   
   // 完全匹配
   if (normalizedA === normalizedB) return true;

@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx';
 import { FileParser } from '@/lib/file-parser';
 import { BatchDataMatcher } from '@/lib/data-matcher';
 import { excelDateToString, isExcelDate } from '@/lib/excel-date-utils';
+import { adjustToMonthEnd } from '@/lib/data-utils';
 
 // 临时文件存储目录
 const TEMP_DIR = path.join(process.cwd(), 'temp');
@@ -38,21 +39,22 @@ function tableToExcel(table: any): XLSX.WorkSheet {
     throw new Error('表格 rows 必须是数组');
   }
   
-  // 转换表头中的日期为用户期望的格式 (YYYY/M/D)
+  // 转换表头中的日期为用户期望的格式 (YYYY/M/D)，并自动调整为月底日期
   const convertedHeaders = headers.map((header: any) => {
     // 检查是否是日期序列号
     if (isExcelDate(header)) {
-      const dateString = excelDateToString(header, 'YYYY/M/D');
+      const dateString = excelDateToString(header, 'YYYY/M/D', true); // 自动调整为月底
       console.log(`转换表头日期序列号: ${header} -> ${dateString}`);
       return dateString;
     }
     
     // 检查是否是 YYYY-MM-DD 格式的日期字符串
     if (typeof header === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(header)) {
-      const [year, month, day] = header.split('-');
-      // 移除月份和日期的前导零
+      // 先调整为月底日期，再转换为 YYYY/M/D 格式
+      const adjustedDate = adjustToMonthEnd(header);
+      const [year, month, day] = adjustedDate.split('-');
       const formattedDate = `${year}/${parseInt(month)}/${parseInt(day)}`;
-      console.log(`转换表头日期格式: ${header} -> ${formattedDate}`);
+      console.log(`转换表头日期格式: ${header} -> ${adjustedDate} -> ${formattedDate}`);
       return formattedDate;
     }
     

@@ -269,8 +269,19 @@ export function fieldMatches(fieldA: string, fieldB: string): boolean {
   const cleanedA = cleanFieldName(normalizedA).toLowerCase();
   const cleanedB = cleanFieldName(normalizedB).toLowerCase();
   
+  // 调试日志
+  if (cleanedA.includes('资本充足率') || cleanedB.includes('资本充足率')) {
+    console.log(`[字段匹配调试] A: "${fieldA}" -> "${cleanedA}"`);
+    console.log(`[字段匹配调试] B: "${fieldB}" -> "${cleanedB}"`);
+  }
+  
   // 完全匹配（使用清理后的名称）
-  if (cleanedA === cleanedB) return true;
+  if (cleanedA === cleanedB) {
+    if (cleanedA.includes('资本充足率')) {
+      console.log(`[字段匹配调试] 完全匹配成功!`);
+    }
+    return true;
+  }
   
   // 移除包含关系的匹配，避免不同指标被错误匹配
   // 例如："资本充足率"、"一级资本充足率"、"核心资本充足率"是不同指标，不应匹配
@@ -279,8 +290,15 @@ export function fieldMatches(fieldA: string, fieldB: string): boolean {
   for (const [key, synonyms] of Object.entries(SYNONYMS)) {
     const group = [key, ...synonyms].map(s => cleanFieldName(s).toLowerCase());
     if (group.includes(cleanedA) && group.includes(cleanedB)) {
+      if (cleanedA.includes('资本充足率') || cleanedB.includes('资本充足率')) {
+        console.log(`[字段匹配调试] 同义词匹配成功! 组: "${key}" -> ${group}`);
+      }
       return true;
     }
+  }
+  
+  if (cleanedA.includes('资本充足率') || cleanedB.includes('资本充足率')) {
+    console.log(`[字段匹配调试] 匹配失败`);
   }
   
   return false;

@@ -254,9 +254,13 @@ export class FileParser {
     const cleanedData = data.filter(row => {
       if (!row || row.length === 0) return false;
       
-      // 检查是否是单位行（如"单位：万元"）
-      const rowText = row.join(' ');
-      if (/单位[:：]/.test(rowText)) {
+      // 检查是否是单位行（如"单位：万元 %"）
+      // 只有当整行只有单位信息时才过滤，如果一行中包含其他数据（如时间点），则保留
+      const nonEmptyCells = row.filter(cell => !isCellEmpty(cell));
+      const rowText = nonEmptyCells.join(' ');
+      
+      // 如果这一行只有单位信息（没有其他数据），则过滤掉
+      if (nonEmptyCells.length === 1 && /单位[:：]/.test(rowText)) {
         return false;
       }
       
@@ -288,19 +292,47 @@ export class FileParser {
     }
     
     // 使用检测到的表头行
-    const headers = cleanedData[headerRowIndex].map(h => String(h || ''));
+    let headers = cleanedData[headerRowIndex].map(h => String(h || ''));
+    
+    // 过滤掉单位列（如"单位：万元 %"）和空值
+    headers = headers.filter(h => {
+      // 如果是单位信息，则过滤掉
+      if (/单位[:：]/.test(h)) {
+        return false;
+      }
+      // 保留有效的时间点
+      return h !== '' && h !== null && h !== undefined;
+    });
+    
     const rows = cleanedData.slice(headerRowIndex + 1);
+    
+    // 确保每行的列数与表头一致
+    const filteredRows = rows.map(row => {
+      // 根据表头的数量，过滤掉对应的列（跳过单位列）
+      const filteredRow = [];
+      let headerColIndex = 0;
+      for (let i = 0; i < row.length && headerColIndex < headers.length; i++) {
+        const originalHeader = cleanedData[headerRowIndex][i];
+        // 如果这一列是单位信息，跳过
+        if (originalHeader && /单位[:：]/.test(String(originalHeader))) {
+          continue;
+        }
+        filteredRow.push(row[i]);
+        headerColIndex++;
+      }
+      return filteredRow;
+    });
     
     console.log('createTableFromRawData - 原始数据行数:', data.length);
     console.log('createTableFromRawData - 过滤后行数:', cleanedData.length);
     console.log('createTableFromRawData - 表头行索引:', headerRowIndex);
     console.log('createTableFromRawData - 表头列数:', headers.length);
-    console.log('createTableFromRawData - 数据行数:', rows.length);
+    console.log('createTableFromRawData - 数据行数:', filteredRows.length);
     console.log('createTableFromRawData - 表头内容:', headers.slice(0, 10));
     
     return {
       headers,
-      rows,
+      rows: filteredRows,
     };
   }
   

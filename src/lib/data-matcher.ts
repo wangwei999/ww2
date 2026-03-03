@@ -26,10 +26,13 @@ export class DataMatcher {
   
   // 表格方向：true=纵向（第一列是时间），false=横向（第一行是时间）
   private isVertical: boolean = true;
-  
+
   // 如果是横向表格，存储第一行的时间点映射（列索引 -> 时间点）
   private timePointsInRow: Map<number, string> = new Map();
-  
+
+  // 源表格的时间点映射（仅用于横向表格）
+  private timePointsInRowSource: Map<number, string> = new Map();
+
   private sourceDataMap: Map<string, Map<string, number>> = new Map();
   
   constructor(
@@ -63,6 +66,11 @@ export class DataMatcher {
     console.log('DataMatcher - 源表格方向:', sourceDirection.isVertical ? '纵向' : '横向');
     console.log('DataMatcher - 目标表格方向:', targetDirection.isVertical ? '纵向' : '横向');
 
+    // 源表格和目标表格的方向必须一致
+    if (sourceDirection.isVertical !== targetDirection.isVertical) {
+      console.log('DataMatcher - 警告：源表格和目标表格方向不一致，强制使用目标表格方向');
+    }
+
     // 使用目标文件的方向作为主方向
     this.isVertical = targetDirection.isVertical;
     console.log('DataMatcher - 最终表格方向:', this.isVertical ? '纵向' : '横向');
@@ -76,6 +84,11 @@ export class DataMatcher {
       console.log('DataMatcher - 提取目标表格时间点...');
       this.timePointsInRow = this.extractTimePointsFromRow(this.targetTable.headers);
       console.log('检测到横向表格，时间点:', Array.from(this.timePointsInRow.entries()));
+
+      // 源表格也必须是横向，提取时间点
+      console.log('DataMatcher - 提取源表格时间点...');
+      this.timePointsInRowSource = this.extractTimePointsFromRow(this.sourceTable.headers);
+      console.log('源表格时间点:', Array.from(this.timePointsInRowSource.entries()));
     }
 
     // 构建源数据索引
@@ -221,18 +234,19 @@ export class DataMatcher {
       console.log('构建横向表格的源数据索引...');
       console.log('源表表头列数:', this.sourceTable.headers.length);
       console.log('源表数据行数:', this.sourceTable.rows.length);
-      
-      // 从表头提取时间点
-      const sourceTimePoints = this.extractTimePointsFromRow(this.sourceTable.headers);
+
+      // 使用已提取的时间点
+      const sourceTimePoints = this.timePointsInRowSource;
       console.log('源表时间点数量:', sourceTimePoints.size);
-      
+      console.log('源表时间点详情:', Array.from(sourceTimePoints.entries()));
+
       // 遍历每一行（每行代表一个字段）
       for (let rowIndex = 0; rowIndex < this.sourceTable.rows.length; rowIndex++) {
         const row = this.sourceTable.rows[rowIndex];
-        
+
         // 第一列是分类名，第二列是字段名
         let fieldName: string | null = null;
-        
+
         // 如果第二列有值，使用第二列
         if (row[1] && typeof row[1] === 'string') {
           fieldName = row[1];
@@ -241,27 +255,27 @@ export class DataMatcher {
         else if (row[0] && typeof row[0] === 'string') {
           fieldName = row[0];
         }
-        
+
         if (!fieldName) continue;
-        
+
         console.log(`处理源表第${rowIndex}行，字段名: ${fieldName}`);
-        
+
         // 遍历每一列（每列代表一个时间点）
         for (const [colIndex, normalizedTime] of sourceTimePoints.entries()) {
           const value = parseNumberCell(row[colIndex]);
           console.log(`  列${colIndex} 时间${normalizedTime} 值${value}`);
-          
+
           if (value !== null) {
             if (!this.sourceDataMap.has(normalizedTime)) {
               this.sourceDataMap.set(normalizedTime, new Map());
             }
-            
+
             const timeMap = this.sourceDataMap.get(normalizedTime)!;
             timeMap.set(fieldName.trim(), value);
           }
         }
       }
-      
+
       console.log('源数据索引构建完成，时间点数量:', this.sourceDataMap.size);
       console.error('[DEBUG] 源数据索引内容:');
       for (const [time, fieldMap] of this.sourceDataMap.entries()) {

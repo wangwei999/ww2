@@ -62,10 +62,12 @@ function saveAsExcel(tables: any[], filename: string): string {
   console.log('原始文件名:', filename);
   console.log('TEMP_DIR:', TEMP_DIR);
   console.log('TEMP_DIR 存在:', existsSync(TEMP_DIR));
+  console.log('要保存的表格数量:', tables.length);
   
   const workbook = XLSX.utils.book_new();
   
   tables.forEach((table, index) => {
+    console.log(`处理表格 ${index + 1}...`);
     const worksheet = tableToExcel(table);
     XLSX.utils.book_append_sheet(workbook, worksheet, `Sheet${index + 1}`);
   });
@@ -205,12 +207,31 @@ export async function POST(request: NextRequest) {
       throw new Error('没有可保存的表格数据');
     }
     
-    // 保存结果
+    // 合并所有表格为一个（如果有多个表格）
+    let finalTable = filledTables[0];
+    if (filledTables.length > 1) {
+      console.log('检测到多个表格，将合并为一个表格');
+      // 使用第一个表格的结构，合并所有行的数据
+      const mergedRows = [...finalTable.rows];
+      for (let i = 1; i < filledTables.length; i++) {
+        const table = filledTables[i];
+        if (table.rows && table.rows.length > 0) {
+          mergedRows.push(...table.rows);
+        }
+      }
+      finalTable = {
+        ...finalTable,
+        rows: mergedRows,
+      };
+      console.log('合并后的表格行数:', finalTable.rows.length);
+    }
+    
+    // 保存结果（只保存一个表格）
     const originalFilename = fileB.name.replace(/\.[^/.]+$/, ""); // 移除扩展名
     const fileId = `${Date.now()}_${originalFilename}.xlsx`;
     console.log('生成的文件ID:', fileId);
     
-    const savedFilename = saveAsExcel(filledTables, fileId);
+    const savedFilename = saveAsExcel([finalTable], fileId);
     
     console.log('文件保存成功:', savedFilename);
     
@@ -221,7 +242,8 @@ export async function POST(request: NextRequest) {
       statistics: {
         totalFilled,
         totalConverted,
-        tableCount: filledTables.length,
+        tableCount: 1,  // 现在总是保存为一个表格
+        mergedTables: filledTables.length > 1 ? filledTables.length : undefined,
       }
     });
   } catch (error) {

@@ -224,10 +224,19 @@ export class FileParser {
       };
     }
     
-    // 移除空行
-    const cleanedData = data.filter(row => 
-      row.some(cell => !isCellEmpty(cell))
-    );
+    // 过滤掉单位行和非数据行
+    const cleanedData = data.filter(row => {
+      if (!row || row.length === 0) return false;
+      
+      // 检查是否是单位行（如"单位：万元"）
+      const rowText = row.join(' ');
+      if (/单位[:：]/.test(rowText)) {
+        return false;
+      }
+      
+      // 检查是否有实际数据（至少有一个非空单元格）
+      return row.some(cell => !isCellEmpty(cell));
+    });
     
     if (cleanedData.length === 0) {
       return {

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Upload, FileSpreadsheet, Download, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
+import { Upload, FileSpreadsheet, Download, Loader2, CheckCircle, AlertCircle, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface FileUploadProps {
@@ -17,6 +17,10 @@ interface FileUploadProps {
 }
 
 function FileUpload({ label, description, file, onFileChange, acceptedTypes }: FileUploadProps) {
+  const handleDelete = () => {
+    onFileChange(null);
+  };
+
   return (
     <Card className="p-6">
       <div className="space-y-4">
@@ -32,13 +36,26 @@ function FileUpload({ label, description, file, onFileChange, acceptedTypes }: F
               accept={acceptedTypes}
               onChange={(e) => onFileChange(e.target.files?.[0] || null)}
               className="cursor-pointer"
+              disabled={!!file}
             />
           </div>
           
           {file && (
-            <div className="flex items-center gap-2 text-sm text-green-600">
-              <CheckCircle className="h-4 w-4" />
-              <span className="max-w-[200px] truncate">{file.name}</span>
+            <div className="flex items-center gap-3 text-sm">
+              <div className="flex items-center gap-2 text-green-600 bg-green-50 dark:bg-green-950/20 px-3 py-1.5 rounded-md">
+                <CheckCircle className="h-4 w-4" />
+                <span className="max-w-[200px] truncate">{file.name}</span>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleDelete}
+                className="h-8 w-8 p-0 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/20"
+                title="删除文件"
+              >
+                <X className="h-4 w-4" />
+              </Button>
             </div>
           )}
         </div>

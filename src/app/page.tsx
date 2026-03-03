@@ -38,6 +38,7 @@ function FileUpload({ label, description, file, onFileChange, acceptedTypes }: F
               onChange={(e) => onFileChange(e.target.files?.[0] || null)}
               className="cursor-pointer"
               disabled={!!file}
+              placeholder="" // 隐藏"未选择文件"提示
             />
           </div>
           

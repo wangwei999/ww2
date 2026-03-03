@@ -46,4 +46,5 @@ export interface MatchResult {
   converted?: boolean;
   unitFrom?: string;
   unitTo?: string;
+  isPercentage?: boolean;  // 是否为百分比
 }

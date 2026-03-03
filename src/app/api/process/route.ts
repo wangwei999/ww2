@@ -21,7 +21,7 @@ async function ensureTempDir() {
 /**
  * 将表格数据转换为 Excel 格式
  */
-function tableToExcel(table: any): XLSX.WorkSheet {
+function tableToExcel(table: any, matchResults: any[] = []): XLSX.WorkSheet {
   console.log('转换表格到 Excel 格式...');
   console.log('表格 headers:', table.headers);
   console.log('表格 rows 数量:', table.rows?.length);
@@ -38,6 +38,13 @@ function tableToExcel(table: any): XLSX.WorkSheet {
     console.error('rows 不是数组:', rows);
     throw new Error('表格 rows 必须是数组');
   }
+  
+  // 创建百分比映射（用于快速查找）
+  const percentageMap = new Map<string, boolean>();
+  matchResults.forEach((mr: any) => {
+    const key = `${mr.rowIndex}-${mr.colIndex}`;
+    percentageMap.set(key, mr.isPercentage || false);
+  });
   
   // 转换表头中的日期为用户期望的格式 (YYYY/M/D)，并自动调整为月底日期
   const convertedHeaders = headers.map((header: any) => {
@@ -61,7 +68,28 @@ function tableToExcel(table: any): XLSX.WorkSheet {
     return header;
   });
   
-  const data = [convertedHeaders, ...rows];
+  // 转换数据行，格式化百分比和保留两位小数
+  const convertedRows = rows.map((row: any[], rowIndex: number) => {
+    return row.map((cell: any, colIndex: number) => {
+      const key = `${rowIndex}-${colIndex}`;
+      const isPercentage = percentageMap.get(key);
+      
+      // 如果是数值且被标记为百分比
+      if (typeof cell === 'number' && isPercentage) {
+        // 保留两位小数，添加 % 符号
+        return `${cell.toFixed(2)}%`;
+      }
+      
+      // 如果是数值（非百分比），保留两位小数
+      if (typeof cell === 'number' && !isPercentage) {
+        return parseFloat(cell.toFixed(2));
+      }
+      
+      return cell;
+    });
+  });
+  
+  const data = [convertedHeaders, ...convertedRows];
   console.log('转换后的数据行数:', data.length);
   console.log('第一行数据:', data[0]);
   
@@ -92,18 +120,19 @@ function sanitizeFilename(filename: string): string {
 /**
  * 保存为 Excel 文件
  */
-function saveAsExcel(tables: any[], filename: string): string {
+function saveAsExcel(tables: any[], filename: string, matchResults: any[] = []): string {
   console.log('开始保存 Excel 文件...');
   console.log('原始文件名:', filename);
   console.log('TEMP_DIR:', TEMP_DIR);
   console.log('TEMP_DIR 存在:', existsSync(TEMP_DIR));
   console.log('要保存的表格数量:', tables.length);
+  console.log('匹配结果数量:', matchResults.length);
   
   const workbook = XLSX.utils.book_new();
   
   tables.forEach((table, index) => {
     console.log(`处理表格 ${index + 1}...`);
-    const worksheet = tableToExcel(table);
+    const worksheet = tableToExcel(table, matchResults);
     XLSX.utils.book_append_sheet(workbook, worksheet, `Sheet${index + 1}`);
   });
   
@@ -201,11 +230,12 @@ export async function POST(request: NextRequest) {
     }
     
     // 批量匹配
+    // 根据需求：源文件默认单位为万元，输出文件转化为亿元
     const matcher = new BatchDataMatcher(
       parseResultA.tables,
       parseResultB.tables,
-      parseResultA.unit,
-      parseResultB.unit,
+      parseResultA.unit || '万元',  // 源文件默认为万元
+      '亿元',  // 输出文件强制为亿元
       parseResultA.tables[0]?.hasPercentage,
       parseResultB.tables[0]?.hasPercentage
     );
@@ -244,6 +274,8 @@ export async function POST(request: NextRequest) {
     
     // 合并所有表格为一个（如果有多个表格）
     let finalTable = filledTables[0];
+    let allMatchResults: any[] = [];
+    
     if (filledTables.length > 1) {
       console.log('检测到多个表格，将合并为一个表格');
       // 使用第一个表格的结构，合并所有行的数据
@@ -253,12 +285,24 @@ export async function POST(request: NextRequest) {
         if (table.rows && table.rows.length > 0) {
           mergedRows.push(...table.rows);
         }
+        // 合并 matchResults
+        if (results[i]?.matchResults) {
+          allMatchResults.push(...results[i].matchResults);
+        }
+      }
+      if (results[0]?.matchResults) {
+        allMatchResults.push(...results[0].matchResults);
       }
       finalTable = {
         ...finalTable,
         rows: mergedRows,
       };
       console.log('合并后的表格行数:', finalTable.rows.length);
+    } else {
+      // 只有一个表格，直接使用其 matchResults
+      if (results[0]?.matchResults) {
+        allMatchResults = results[0].matchResults;
+      }
     }
     
     // 保存结果（只保存一个表格）
@@ -266,7 +310,7 @@ export async function POST(request: NextRequest) {
     const fileId = `${Date.now()}_${originalFilename}.xlsx`;
     console.log('生成的文件ID:', fileId);
     
-    const savedFilename = saveAsExcel([finalTable], fileId);
+    const savedFilename = saveAsExcel([finalTable], fileId, allMatchResults);
     
     console.log('文件保存成功:', savedFilename);
     

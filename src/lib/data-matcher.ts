@@ -334,6 +334,10 @@ export class DataMatcher {
             
             if (matchedValue !== null) {
               const convertedValue = this.convertValue(matchedValue);
+              
+              // 检测是否为百分比（三位数及以下）
+              const isPercentage = matchedValue <= 999;
+              
               newRow[col] = convertedValue;
               
               matchResults.push({
@@ -343,6 +347,7 @@ export class DataMatcher {
                 converted: this.needsConversion(),
                 unitFrom: this.sourceUnit,
                 unitTo: this.targetUnit,
+                isPercentage,
               });
             }
           }
@@ -397,6 +402,10 @@ export class DataMatcher {
           
           if (matchedValue !== null) {
             const convertedValue = this.convertValue(matchedValue);
+            
+            // 检测是否为百分比（三位数及以下）
+            const isPercentage = matchedValue <= 999;
+            
             newRow[colIndex] = convertedValue;
             
             matchResults.push({
@@ -406,9 +415,10 @@ export class DataMatcher {
               converted: this.needsConversion(),
               unitFrom: this.sourceUnit,
               unitTo: this.targetUnit,
+              isPercentage,
             });
             
-            console.log(`  填充: 列${colIndex} 时间${normalizedTime} 值${matchedValue} → ${convertedValue}`);
+            console.log(`  填充: 列${colIndex} 时间${normalizedTime} 值${matchedValue} → ${convertedValue}${isPercentage ? ' (百分比)' : ''}`);
           }
         }
         

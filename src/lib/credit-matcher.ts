@@ -12,6 +12,9 @@ export interface OrganizationMapping {
   valueC: any;
   valueD: number | null;
   valueN: number | null;
+  sourceSheet?: string; // 标记从哪个表匹配的（'单体' 或 '集团'）
+  colC?: number; // C列的列号（单体表3，集团表30）
+  colD?: number; // D列的列号（单体表4，集团表5）
 }
 
 /**
@@ -21,7 +24,8 @@ export class CreditMatcher {
   private sourceWorkbook: ExcelJS.Workbook;
   private targetWorkbook: ExcelJS.Workbook;
   private targetSheet: ExcelJS.Worksheet;
-  private sourceSheet: ExcelJS.Worksheet;
+  private sourceSheet单体: ExcelJS.Worksheet;
+  private sourceSheet集团: ExcelJS.Worksheet | null;
   private mappings: OrganizationMapping[] = [];
 
   constructor(
@@ -43,18 +47,24 @@ export class CreditMatcher {
     }
     this.targetSheet = targetSheet as ExcelJS.Worksheet;
 
+    // 尝试获取单体表
     const sourceSheetName = '单体';
     const sourceSheet = sourceWorkbook.getWorksheet(sourceSheetName);
     if (!sourceSheet) {
       throw new Error(`源文件中未找到"${sourceSheetName}"工作表`);
     }
-    this.sourceSheet = sourceSheet as ExcelJS.Worksheet;
+    this.sourceSheet单体 = sourceSheet as ExcelJS.Worksheet;
+
+    // 尝试获取集团表（可选）
+    const sourceSheet集团 = sourceWorkbook.getWorksheet('集团');
+    this.sourceSheet集团 = sourceSheet集团 || null;
 
     console.log('=== CreditMatcher 初始化（使用exceljs）===');
     console.log('源文件工作表:', sourceWorkbook.worksheets.map(ws => ws.name));
     console.log('目标文件工作表:', targetWorkbook.worksheets.map(ws => ws.name));
     console.log('目标工作表:', this.targetSheet.name);
-    console.log('源工作表:', this.sourceSheet.name);
+    console.log('源工作表-单体:', this.sourceSheet单体.name);
+    console.log('源工作表-集团:', this.sourceSheet集团?.name || '无');
   }
 
   /**
@@ -71,27 +81,49 @@ export class CreditMatcher {
   }> {
     console.log('=== 开始授信模式匹配（使用exceljs保留格式）===');
 
-    // 构建源文件的机构名称索引（B列，从第4行开始）
-    const sourceOrgMap = new Map<string, number>();
-    const sourceRowCount = this.sourceSheet.rowCount;
+    // 构建单体表的机构名称索引（B列，从第4行开始）
+    const sourceOrgMap单体 = new Map<string, number>();
+    const sourceRowCount单体 = this.sourceSheet单体.rowCount;
     
-    console.log('源文件总行数:', sourceRowCount);
+    console.log('单体表总行数:', sourceRowCount单体);
     
-    for (let row = 4; row <= sourceRowCount; row++) {
-      const cell = this.sourceSheet.getCell(row, 2);
+    for (let row = 4; row <= sourceRowCount单体; row++) {
+      const cell = this.sourceSheet单体.getCell(row, 2);
       const orgName = String(cell.value || '').trim();
       
       if (orgName && orgName !== '机构名称') {
         const normalizedName = normalizeOrganizationName(orgName);
-        sourceOrgMap.set(normalizedName, row);
+        sourceOrgMap单体.set(normalizedName, row);
         
         if (normalizedName !== orgName) {
-          console.log(`源文件规范化: ${orgName} → ${normalizedName} (行${row})`);
+          console.log(`单体表规范化: ${orgName} → ${normalizedName} (行${row})`);
         }
       }
     }
 
-    console.log('源文件机构索引大小:', sourceOrgMap.size);
+    // 构建集团表的机构名称索引（D列，从第4行开始）
+    const sourceOrgMap集团 = new Map<string, number>();
+    if (this.sourceSheet集团) {
+      const sourceRowCount集团 = this.sourceSheet集团.rowCount;
+      console.log('集团表总行数:', sourceRowCount集团);
+      
+      for (let row = 4; row <= sourceRowCount集团; row++) {
+        const cell = this.sourceSheet集团.getCell(row, 4); // D列
+        const orgName = String(cell.value || '').trim();
+        
+        if (orgName && orgName !== '机构名称') {
+          const normalizedName = normalizeOrganizationName(orgName);
+          sourceOrgMap集团.set(normalizedName, row);
+          
+          if (normalizedName !== orgName) {
+            console.log(`集团表规范化: ${orgName} → ${normalizedName} (行${row})`);
+          }
+        }
+      }
+    }
+
+    console.log('单体表机构索引大小:', sourceOrgMap单体.size);
+    console.log('集团表机构索引大小:', sourceOrgMap集团.size);
 
     // 遍历目标文件的机构（B列，从第6行开始）
     const targetRowCount = this.targetSheet.rowCount;
@@ -108,8 +140,23 @@ export class CreditMatcher {
         console.log(`  规范化后: ${normalizedName}`);
         console.log(`  是否与原始相同: ${normalizedName === orgName}`);
         
-        const sourceRowIndex = sourceOrgMap.get(normalizedName);
-        console.log(`  源文件行号: ${sourceRowIndex !== undefined ? sourceRowIndex : '未找到'}`);
+        // 先从单体表查找
+        let sourceRowIndex = sourceOrgMap单体.get(normalizedName);
+        let sourceSheet = '单体';
+        let colC = 3; // 单体表C列
+        let colD = 4; // 单体表D列
+        
+        // 如果单体表找不到，再从集团表查找
+        if (sourceRowIndex === undefined && this.sourceSheet集团) {
+          sourceRowIndex = sourceOrgMap集团.get(normalizedName);
+          if (sourceRowIndex !== undefined) {
+            sourceSheet = '集团';
+            colC = 30; // 集团表AD列（AD=30）
+            colD = 5;  // 集团表E列
+          }
+        }
+        
+        console.log(`  源文件行号: ${sourceRowIndex !== undefined ? `${sourceSheet}行${sourceRowIndex}` : '未找到'}`);
 
         const mapping: OrganizationMapping = {
           targetRowIndex: row,
@@ -119,29 +166,38 @@ export class CreditMatcher {
           valueC: null,
           valueD: null,
           valueN: null,
+          sourceSheet: undefined,
+          colC: undefined,
+          colD: undefined,
         };
 
         if (sourceRowIndex !== undefined) {
+          const actualSourceSheet = sourceSheet === '单体' ? this.sourceSheet单体 : this.sourceSheet集团;
+          if (!actualSourceSheet) continue;
+          
           mapping.matched = true;
           mapping.sourceRowIndex = sourceRowIndex;
+          mapping.sourceSheet = sourceSheet;
+          mapping.colC = colC;
+          mapping.colD = colD;
 
-          const cellC = this.sourceSheet.getCell(sourceRowIndex, 3);
-          const cellD = this.sourceSheet.getCell(sourceRowIndex, 4);
+          const cellC = actualSourceSheet.getCell(sourceRowIndex, colC);
+          const cellD = actualSourceSheet.getCell(sourceRowIndex, colD);
 
           const matchInfo = normalizedName !== orgName 
             ? `(${orgName} → ${normalizedName})` 
             : orgName;
           
-          console.log(`匹配成功: ${matchInfo}`);
-          console.log(`  源C列type: ${cellC.type}, 源D列type: ${cellD.type}`);
-          console.log(`  源C列value: ${JSON.stringify(cellC.value)}, 源D列value: ${JSON.stringify(cellD.value)}`);
-          console.log(`  源C列完整对象: ${JSON.stringify({type: cellC.type, value: cellC.value, result: (cellC as any).result, formula: (cellC as any).formula, text: (cellC as any).text, numFmt: cellC.numFmt})}`);
-          console.log(`  源D列完整对象: ${JSON.stringify({type: cellD.type, value: cellD.value, result: (cellD as any).result, formula: (cellD as any).formula, text: (cellD as any).text, numFmt: cellD.numFmt})}`);
+          console.log(`匹配成功 (${sourceSheet}): ${matchInfo}`);
+          console.log(`  源列${String.fromCharCode(64 + colC)}type: ${cellC.type}, 源列${String.fromCharCode(64 + colD)}type: ${cellD.type}`);
+          console.log(`  源列${String.fromCharCode(64 + colC)}value: ${JSON.stringify(cellC.value)}, 源列${String.fromCharCode(64 + colD)}value: ${JSON.stringify(cellD.value)}`);
+          console.log(`  源列${String.fromCharCode(64 + colC)}完整对象: ${JSON.stringify({type: cellC.type, value: cellC.value, result: (cellC as any).result, formula: (cellC as any).formula, text: (cellC as any).text, numFmt: cellC.numFmt})}`);
+          console.log(`  源列${String.fromCharCode(64 + colD)}完整对象: ${JSON.stringify({type: cellD.type, value: cellD.value, result: (cellD as any).result, formula: (cellD as any).formula, text: (cellD as any).text, numFmt: cellD.numFmt})}`);
           
           // 对于第一行匹配，额外输出源文件该行的所有信息
           if (this.mappings.length === 0) {
             console.log(`  === 第一行匹配，输出源文件行${sourceRowIndex}的所有信息 ===`);
-            const sourceRow = this.sourceSheet.getRow(sourceRowIndex);
+            const sourceRow = actualSourceSheet.getRow(sourceRowIndex);
             console.log(`  源行${sourceRowIndex}单元格数: ${sourceRow.cellCount}`);
             for (let col = 1; col <= 15; col++) {
               const cell = sourceRow.getCell(col);
@@ -257,7 +313,7 @@ export class CreditMatcher {
     console.log('=== 开始填充随机字段名称 ===');
 
     // 1. 获取A文件第3行（字段名）和第4-173行（数据）
-    const headerRow = this.sourceSheet.getRow(3);
+    const headerRow = this.sourceSheet单体.getRow(3);
     const fieldNames: string[] = [];
     for (let col = 5; col <= 28; col++) { // E列(5)到AB列(28)
       const cell = headerRow.getCell(col);
@@ -283,7 +339,11 @@ export class CreditMatcher {
 
     for (const mapping of this.mappings) {
       if (mapping.matched && mapping.sourceRowIndex > 0) {
-        const sourceRow = this.sourceSheet.getRow(mapping.sourceRowIndex);
+        // 获取机构匹配的源表
+        const sourceSheet = mapping.sourceSheet === '集团' ? this.sourceSheet集团 : this.sourceSheet单体;
+        if (!sourceSheet) continue;
+        
+        const sourceRow = sourceSheet.getRow(mapping.sourceRowIndex);
         const fieldValueMap = new Map<string, number>();
 
         // 检查E列到AB列的数值
@@ -314,7 +374,7 @@ export class CreditMatcher {
           sourceRow: mapping.sourceRowIndex,
           fieldValueMap
         });
-        console.log(`机构: ${mapping.orgName} (目标行${mapping.targetRowIndex}), 有数值字段数: ${fieldValueMap.size}`);
+        console.log(`机构: ${mapping.orgName} (目标行${mapping.targetRowIndex}, 源表:${mapping.sourceSheet || '单体'}), 有数值字段数: ${fieldValueMap.size}`);
       }
     }
 

@@ -55,8 +55,10 @@ export class CreditMatcher {
     }
     this.sourceSheet单体 = sourceSheet as ExcelJS.Worksheet;
 
-    // 尝试获取集团表（可选）
-    const sourceSheet集团 = sourceWorkbook.getWorksheet('集团');
+    // 尝试获取集团表（可选，尝试多种可能的名称）
+    const sourceSheet集团 = sourceWorkbook.getWorksheet('集团') || 
+                             sourceWorkbook.getWorksheet('集团 ') ||
+                             sourceWorkbook.getWorksheet('集团表');
     this.sourceSheet集团 = sourceSheet集团 || null;
 
     console.log('=== CreditMatcher 初始化（使用exceljs）===');

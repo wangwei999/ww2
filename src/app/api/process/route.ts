@@ -220,6 +220,70 @@ function saveAsExcel(tables: any[], filename: string, matchResults: any[] = [], 
   }
 }
 
+/**
+ * 直接保存 workbook（保留原始格式）
+ * @param workbook Excel workbook 对象
+ * @param filename 文件名
+ */
+function saveWorkbook(workbook: XLSX.WorkBook, filename: string): string {
+  console.log('=== 开始保存 Workbook（保留原始格式）===');
+  console.log('原始文件名:', filename);
+  console.log('TEMP_DIR:', TEMP_DIR);
+  console.log('TEMP_DIR 存在:', existsSync(TEMP_DIR));
+  console.log('Workbooks 包含工作表:', workbook.SheetNames);
+  
+  // 清理文件名
+  const safeFilename = sanitizeFilename(filename);
+  const filePath = path.join(TEMP_DIR, safeFilename);
+  
+  console.log('安全文件名:', safeFilename);
+  console.log('完整文件路径:', filePath);
+  
+  try {
+    // 确保目录存在
+    if (!existsSync(TEMP_DIR)) {
+      console.log('创建 temp 目录...');
+      mkdirSync(TEMP_DIR, { recursive: true });
+    }
+    
+    // 使用 XLSX.write 生成 buffer
+    console.log('生成 Excel buffer...');
+    const buffer = XLSX.write(workbook, { 
+      type: 'buffer', 
+      bookType: 'xlsx',
+      bookSST: false,  // 不使用共享字符串表，保留原始格式
+      compression: false,  // 不压缩，便于调试
+    });
+    
+    console.log('写入文件...');
+    writeFileSync(filePath, buffer);
+    
+    console.log('文件保存成功');
+    return safeFilename;
+  } catch (error) {
+    console.error('保存文件失败，错误详情:', error);
+    
+    // 如果失败，使用时间戳作为文件名
+    const fallbackFilename = `${Date.now()}.xlsx`;
+    const fallbackPath = path.join(TEMP_DIR, fallbackFilename);
+    
+    console.log('尝试使用备用文件名:', fallbackFilename);
+    
+    try {
+      const buffer = XLSX.write(workbook, { 
+        type: 'buffer', 
+        bookType: 'xlsx' 
+      });
+      writeFileSync(fallbackPath, buffer);
+      console.log('备用文件保存成功');
+      return fallbackFilename;
+    } catch (fallbackError) {
+      console.error('备用文件保存也失败:', fallbackError);
+      throw new Error(`无法保存文件: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+    }
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     await ensureTempDir();
@@ -298,6 +362,7 @@ export async function POST(request: NextRequest) {
     console.log('是否启用特殊模式:', isSpecialMode);
     
     let filledTable: any;
+    let filledWorkbook: XLSX.WorkBook | undefined;
     let allMatchResults: any[] = [];
     let statistics: any = {};
     
@@ -315,9 +380,9 @@ export async function POST(request: NextRequest) {
       // 创建授信模式匹配器
       const creditMatcher = new CreditMatcher(workbookA, workbookB);
       
-      // 执行匹配
-      const { filledTable: filled, mappings, statistics: stats } = creditMatcher.matchAndFill();
-      filledTable = filled;
+      // 执行匹配并直接修改B文件workbook
+      const { workbook, mappings, statistics: stats } = creditMatcher.matchAndFill();
+      filledWorkbook = workbook; // 保存修改后的workbook
       allMatchResults = mappings;
       statistics = {
         totalFilled: stats.matchedCount,
@@ -423,14 +488,22 @@ export async function POST(request: NextRequest) {
       };
     }
     
-    // 验证表格数据
-    if (!filledTable) {
-      throw new Error('没有可保存的表格数据');
+    // 验证数据
+    if (isSpecialMode) {
+      if (!filledWorkbook) {
+        throw new Error('授信模式：没有可保存的workbook');
+      }
+    } else {
+      if (!filledTable) {
+        throw new Error('常规模式：没有可保存的表格数据');
+      }
     }
     
-    console.log('准备保存表格');
-    console.log('表格 headers:', filledTable.headers);
-    console.log('表格 rows 数量:', filledTable.rows?.length);
+    console.log('准备保存文件');
+    if (!isSpecialMode) {
+      console.log('表格 headers:', filledTable.headers);
+      console.log('表格 rows 数量:', filledTable.rows?.length);
+    }
     
     // 保存结果（统一保存为 XLSX 格式，便于后续编辑和查看）
     // 注意：无论输入文件是 XLSX 还是 DOCX，输出统一为 XLSX 格式
@@ -439,16 +512,28 @@ export async function POST(request: NextRequest) {
     console.log('生成的文件ID:', fileId);
     console.log('注意：输出格式统一为 XLSX，便于查看和编辑');
     
-    // 授信模式不需要keepOriginalFormat参数，默认为false
-    const keepOriginalFormat = parseResultB.keepOriginalFormat || false;
-    const savedFilename = saveAsExcel([filledTable], fileId, allMatchResults, isSpecialMode ? false : keepOriginalFormat);
+    let savedFilename: string;
+    
+    if (isSpecialMode) {
+      // 授信模式：直接保存workbook，保留原始格式
+      if (!filledWorkbook) {
+        throw new Error('授信模式：没有可保存的workbook');
+      }
+      savedFilename = saveWorkbook(filledWorkbook, fileId);
+      console.log('授信模式：已保存workbook（保留原始格式）');
+    } else {
+      // 常规模式：使用saveAsExcel
+      const keepOriginalFormat = parseResultB.keepOriginalFormat || false;
+      savedFilename = saveAsExcel([filledTable], fileId, allMatchResults, keepOriginalFormat);
+      console.log('常规模式：已保存表格');
+    }
     
     console.log('文件保存成功:', savedFilename);
     
     return NextResponse.json({ 
       success: true, 
       fileId: savedFilename,
-      message: isSpecialMode ? '授信模式处理完成' : '处理完成',
+      message: isSpecialMode ? '授信模式处理完成（保留原始格式）' : '处理完成',
       mode: isSpecialMode ? '授信模式' : '常规模式',
       outputFormat: 'xlsx',  // 明确说明输出格式
       originalFormat: fileB.name.split('.').pop(),  // 原始格式

@@ -352,15 +352,32 @@ export class CreditMatcher {
       const col = shuffledColumns[i];
       const field = shuffledNonZeroFields[i];
 
-      // 填充字段名称到第5行
+      // 填充字段名称到第5行（带自动换行和边框）
       const nameCell = this.targetSheet.getCell(5, col);
       nameCell.value = field.name;
-      nameCell.style = { numFmt: 'General' };
+      nameCell.style = {
+        numFmt: 'General',
+        alignment: { wrapText: true },
+        border: {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        }
+      };
 
-      // 填充数值到第6行
+      // 填充数值到第6行（带边框）
       const valueCell = this.targetSheet.getCell(6, col);
       valueCell.value = field.value;
-      valueCell.style = { numFmt: 'General' };
+      valueCell.style = {
+        numFmt: 'General',
+        border: {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        }
+      };
 
       console.log(`  ${String.fromCharCode(64 + col)}5: ${field.name}, ${String.fromCharCode(64 + col)}6: ${field.value}`);
     }
@@ -377,10 +394,31 @@ export class CreditMatcher {
       const col = remainingSlots[i];
       const fieldName = shuffledAvailableFields[i] || `字段${col}`;
 
-      // 只填充字段名称到第5行，第6行保持空
+      // 只填充字段名称到第5行（带自动换行和边框），第6行保持空（带边框）
       const nameCell = this.targetSheet.getCell(5, col);
       nameCell.value = fieldName;
-      nameCell.style = { numFmt: 'General' };
+      nameCell.style = {
+        numFmt: 'General',
+        alignment: { wrapText: true },
+        border: {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        }
+      };
+
+      // 第6行为空，但也要添加边框
+      const emptyCell = this.targetSheet.getCell(6, col);
+      emptyCell.style = {
+        numFmt: 'General',
+        border: {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        }
+      };
 
       console.log(`  ${String.fromCharCode(64 + col)}5: ${fieldName} (无数值)`);
     }
@@ -390,17 +428,34 @@ export class CreditMatcher {
     for (let col = 5; col <= 13; col++) { // E-M列
       const targetCol = col + 10; // O-W列（E+10=O=15, M+10=W=23）
       
-      // 复制第5行（字段名称）
+      // 复制第5行（字段名称，带自动换行和边框）
       const nameCell = this.targetSheet.getCell(5, col);
       const copyNameCell = this.targetSheet.getCell(5, targetCol);
       copyNameCell.value = nameCell.value;
-      copyNameCell.style = { numFmt: 'General' };
+      copyNameCell.style = {
+        numFmt: 'General',
+        alignment: { wrapText: true },
+        border: {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        }
+      };
       
-      // 复制第6行（数值）
+      // 复制第6行（数值，带边框）
       const valueCell = this.targetSheet.getCell(6, col);
       const copyValueCell = this.targetSheet.getCell(6, targetCol);
       copyValueCell.value = valueCell.value;
-      copyValueCell.style = { numFmt: 'General' };
+      copyValueCell.style = {
+        numFmt: 'General',
+        border: {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        }
+      };
       
       console.log(`  ${String.fromCharCode(64 + targetCol)}5: ${nameCell.value}, ${String.fromCharCode(64 + targetCol)}6: ${valueCell.value}`);
     }

@@ -122,8 +122,23 @@ export class CreditMatcher {
       }
     }
 
-    console.log('单体表机构索引大小:', sourceOrgMap单体.size);
+        console.log('单体表机构索引大小:', sourceOrgMap单体.size);
     console.log('集团表机构索引大小:', sourceOrgMap集团.size);
+    console.log('集团表是否存在:', !!this.sourceSheet集团);
+    
+    // 输出集团表的前5个机构名称用于调试
+    if (this.sourceSheet集团) {
+      console.log('集团表前5个机构名称:');
+      let count = 0;
+      for (let row = 4; row <= this.sourceSheet集团.rowCount && count < 5; row++) {
+        const cell = this.sourceSheet集团.getCell(row, 4);
+        const orgName = String(cell.value || '').trim();
+        if (orgName && orgName !== '机构名称') {
+          console.log(`  行${row}: ${orgName}`);
+          count++;
+        }
+      }
+    }
 
     // 遍历目标文件的机构（B列，从第6行开始）
     const targetRowCount = this.targetSheet.rowCount;

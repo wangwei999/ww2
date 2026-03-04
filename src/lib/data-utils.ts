@@ -65,6 +65,39 @@ const SYNONYMS: Record<string, string[]> = {
   // 可以继续添加更多同义词
 };
 
+/**
+ * 机构名称同义词映射（简称 ↔ 全称）
+ * 用于处理不同文件中同一机构的名称差异
+ */
+export const ORGANIZATION_SYNONYMS: Record<string, string> = {
+  // 具体机构映射（必须放在前面，优先匹配）
+  '浙江萧山农商银行股份有限公司': '浙江萧山农村商业银行股份有限公司',
+  '浙江农商联合银行': '浙江农村商业联合银行股份有限公司',
+  
+  // 通用模式映射（放在后面）
+  // 注意：这些通用模式可能会误匹配，需要谨慎使用
+};
+
+/**
+ * 规范化机构名称
+ * 将简称转换为全称，便于匹配
+ */
+export function normalizeOrganizationName(orgName: string): string {
+  if (!orgName) return '';
+  
+  const trimmed = orgName.trim();
+  
+  // 直接查找同义词映射
+  if (ORGANIZATION_SYNONYMS[trimmed]) {
+    return ORGANIZATION_SYNONYMS[trimmed];
+  }
+  
+  // 尝试模糊匹配（去除标点符号后比较）
+  const normalized = trimmed.replace(/[农商行]银行股份有限公司/g, '农村商业银行股份有限公司');
+  
+  return normalized;
+}
+
 // 单位转换映射（数值越大单位越小）
 const UNIT_VALUES: Record<string, number> = {
   '亿元': 100000000,

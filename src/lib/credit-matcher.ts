@@ -384,5 +384,25 @@ export class CreditMatcher {
 
       console.log(`  ${String.fromCharCode(64 + col)}5: ${fieldName} (无数值)`);
     }
+
+    // 5. 复制E5-M6到O5-W6（偏移10列）
+    console.log(`\\n复制E5-M6到O5-W6...`);
+    for (let col = 5; col <= 13; col++) { // E-M列
+      const targetCol = col + 10; // O-W列（E+10=O=15, M+10=W=23）
+      
+      // 复制第5行（字段名称）
+      const nameCell = this.targetSheet.getCell(5, col);
+      const copyNameCell = this.targetSheet.getCell(5, targetCol);
+      copyNameCell.value = nameCell.value;
+      copyNameCell.style = { numFmt: 'General' };
+      
+      // 复制第6行（数值）
+      const valueCell = this.targetSheet.getCell(6, col);
+      const copyValueCell = this.targetSheet.getCell(6, targetCol);
+      copyValueCell.value = valueCell.value;
+      copyValueCell.style = { numFmt: 'General' };
+      
+      console.log(`  ${String.fromCharCode(64 + targetCol)}5: ${nameCell.value}, ${String.fromCharCode(64 + targetCol)}6: ${valueCell.value}`);
+    }
   }
 }

@@ -241,11 +241,6 @@ export class CreditMatcher {
                 left: { style: 'thin' },
                 bottom: { style: 'thin' },
                 right: { style: 'thin' }
-              },
-              fill: {
-                type: 'pattern',
-                pattern: 'solid',
-                fgColor: { argb: 'FFFFFFFF' }
               }
             };
             console.log(`  C列格式已设置: ${cellC.numFmt}, 值: ${JSON.stringify(cellC.value)}, 值类型: ${typeof cellC.value}, 是否为Date: ${cellC.value instanceof Date}`);
@@ -263,11 +258,6 @@ export class CreditMatcher {
                 left: { style: 'thin' },
                 bottom: { style: 'thin' },
                 right: { style: 'thin' }
-              },
-              fill: {
-                type: 'pattern',
-                pattern: 'solid',
-                fgColor: { argb: 'FFFFFFFF' }
               }
             };
             console.log(`  D列已填充值: ${mapping.valueD}`);
@@ -285,11 +275,6 @@ export class CreditMatcher {
                 left: { style: 'thin' },
                 bottom: { style: 'thin' },
                 right: { style: 'thin' }
-              },
-              fill: {
-                type: 'pattern',
-                pattern: 'solid',
-                fgColor: { argb: 'FFFFFFFF' }
               }
             };
             console.log(`  N列已填充值: ${mapping.valueN}`);
@@ -470,11 +455,6 @@ export class CreditMatcher {
           left: { style: 'thin' },
           bottom: { style: 'thin' },
           right: { style: 'thin' }
-        },
-        fill: {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: 'FFFFFFFF' }
         }
       };
       
@@ -519,11 +499,6 @@ export class CreditMatcher {
             left: { style: 'thin' },
             bottom: { style: 'thin' },
             right: { style: 'thin' }
-          },
-          fill: {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: 'FFFFFFFF' }
           }
         };
       }

@@ -333,7 +333,7 @@ export class CreditMatcher {
     const { targetRow, nonZeroFields } = data;
     console.log(`\\n=== 为 ${data.orgName} (目标行${targetRow}) 填充随机字段 ===`);
 
-    // B文件E5-M5列（5-13列）
+    // B文件E-M列（5-13列）
     const targetColumns = [5, 6, 7, 8, 9, 10, 11, 12, 13]; // E-M列
     const totalSlots = targetColumns.length; // 9个单元格
 
@@ -352,8 +352,8 @@ export class CreditMatcher {
       const col = shuffledColumns[i];
       const field = shuffledNonZeroFields[i];
 
-      // 填充字段名称到第5行（带自动换行和边框）
-      const nameCell = this.targetSheet.getCell(5, col);
+      // 填充字段名称到目标行（带自动换行和边框）
+      const nameCell = this.targetSheet.getCell(targetRow, col);
       nameCell.value = field.name;
       nameCell.style = {
         numFmt: 'General',
@@ -366,8 +366,8 @@ export class CreditMatcher {
         }
       };
 
-      // 填充数值到第6行（带边框）
-      const valueCell = this.targetSheet.getCell(6, col);
+      // 填充数值到目标行+1（带边框）
+      const valueCell = this.targetSheet.getCell(targetRow + 1, col);
       valueCell.value = field.value;
       valueCell.style = {
         numFmt: 'General',
@@ -379,7 +379,7 @@ export class CreditMatcher {
         }
       };
 
-      console.log(`  ${String.fromCharCode(64 + col)}5: ${field.name}, ${String.fromCharCode(64 + col)}6: ${field.value}`);
+      console.log(`  ${String.fromCharCode(64 + col)}${targetRow}: ${field.name}, ${String.fromCharCode(64 + col)}${targetRow + 1}: ${field.value}`);
     }
 
     // 4. 填充剩余的空单元格（从所有字段名称中随机选择，排除已选择的）
@@ -394,8 +394,8 @@ export class CreditMatcher {
       const col = remainingSlots[i];
       const fieldName = shuffledAvailableFields[i] || `字段${col}`;
 
-      // 只填充字段名称到第5行（带自动换行和边框），第6行保持空（带边框）
-      const nameCell = this.targetSheet.getCell(5, col);
+      // 只填充字段名称到目标行（带自动换行和边框），目标行+1保持空（带边框）
+      const nameCell = this.targetSheet.getCell(targetRow, col);
       nameCell.value = fieldName;
       nameCell.style = {
         numFmt: 'General',
@@ -408,8 +408,8 @@ export class CreditMatcher {
         }
       };
 
-      // 第6行为空，但也要添加边框
-      const emptyCell = this.targetSheet.getCell(6, col);
+      // 目标行+1为空，但也要添加边框
+      const emptyCell = this.targetSheet.getCell(targetRow + 1, col);
       emptyCell.style = {
         numFmt: 'General',
         border: {
@@ -420,17 +420,17 @@ export class CreditMatcher {
         }
       };
 
-      console.log(`  ${String.fromCharCode(64 + col)}5: ${fieldName} (无数值)`);
+      console.log(`  ${String.fromCharCode(64 + col)}${targetRow}: ${fieldName} (无数值)`);
     }
 
-    // 5. 复制E5-M6到O5-W6（偏移10列）
-    console.log(`\\n复制E5-M6到O5-W6...`);
+    // 5. 复制E[targetRow]-M[targetRow+1]到O[targetRow]-W[targetRow+1]（偏移10列）
+    console.log(`\\n复制E${targetRow}-M${targetRow + 1}到O${targetRow}-W${targetRow + 1}...`);
     for (let col = 5; col <= 13; col++) { // E-M列
       const targetCol = col + 10; // O-W列（E+10=O=15, M+10=W=23）
       
-      // 复制第5行（字段名称，带自动换行和边框）
-      const nameCell = this.targetSheet.getCell(5, col);
-      const copyNameCell = this.targetSheet.getCell(5, targetCol);
+      // 复制目标行（字段名称，带自动换行和边框）
+      const nameCell = this.targetSheet.getCell(targetRow, col);
+      const copyNameCell = this.targetSheet.getCell(targetRow, targetCol);
       copyNameCell.value = nameCell.value;
       copyNameCell.style = {
         numFmt: 'General',
@@ -443,9 +443,9 @@ export class CreditMatcher {
         }
       };
       
-      // 复制第6行（数值，带边框）
-      const valueCell = this.targetSheet.getCell(6, col);
-      const copyValueCell = this.targetSheet.getCell(6, targetCol);
+      // 复制目标行+1（数值，带边框）
+      const valueCell = this.targetSheet.getCell(targetRow + 1, col);
+      const copyValueCell = this.targetSheet.getCell(targetRow + 1, targetCol);
       copyValueCell.value = valueCell.value;
       copyValueCell.style = {
         numFmt: 'General',
@@ -457,7 +457,7 @@ export class CreditMatcher {
         }
       };
       
-      console.log(`  ${String.fromCharCode(64 + targetCol)}5: ${nameCell.value}, ${String.fromCharCode(64 + targetCol)}6: ${valueCell.value}`);
+      console.log(`  ${String.fromCharCode(64 + targetCol)}${targetRow}: ${nameCell.value}, ${String.fromCharCode(64 + targetCol)}${targetRow + 1}: ${valueCell.value}`);
     }
   }
 }

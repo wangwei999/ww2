@@ -134,34 +134,62 @@ export class CreditMatcher {
           
           console.log(`匹配成功: ${matchInfo}`);
           console.log(`  源C列type: ${cellC.type}, 源D列type: ${cellD.type}`);
+          console.log(`  源C列value: ${JSON.stringify(cellC.value)}, 源D列value: ${JSON.stringify(cellD.value)}`);
+          console.log(`  源C列完整对象: ${JSON.stringify({type: cellC.type, value: cellC.value, result: (cellC as any).result, formula: (cellC as any).formula, text: (cellC as any).text, numFmt: cellC.numFmt})}`);
+          console.log(`  源D列完整对象: ${JSON.stringify({type: cellD.type, value: cellD.value, result: (cellD as any).result, formula: (cellD as any).formula, text: (cellD as any).text, numFmt: cellD.numFmt})}`);
+          
+          // 对于第一行匹配，额外输出源文件该行的所有信息
+          if (this.mappings.length === 0) {
+            console.log(`  === 第一行匹配，输出源文件行${sourceRowIndex}的所有信息 ===`);
+            const sourceRow = this.sourceSheet.getRow(sourceRowIndex);
+            console.log(`  源行${sourceRowIndex}单元格数: ${sourceRow.cellCount}`);
+            for (let col = 1; col <= 15; col++) {
+              const cell = sourceRow.getCell(col);
+              console.log(`  列${col} (type=${cell.type}): value=${JSON.stringify(cell.value)}, text=${JSON.stringify((cell as any).text)}, numFmt=${JSON.stringify(cell.numFmt)}`);
+            }
+          }
 
           mapping.valueC = this.parseCellValue(cellC.value);
           mapping.valueD = this.parseCellValue(cellD.value);
           mapping.valueN = mapping.valueD;
 
           console.log(`  目标行: ${row} (B${row}), 源行: ${sourceRowIndex} (B${sourceRowIndex})`);
-          console.log(`  C列值: ${mapping.valueC}, D列值: ${mapping.valueD}, N列值: ${mapping.valueN}`);
+          console.log(`  解析后C列值: ${JSON.stringify(mapping.valueC)}, 解析后D列值: ${JSON.stringify(mapping.valueD)}, N列值: ${JSON.stringify(mapping.valueN)}`);
 
-          // C列：保留原始日期对象
-          const valueC = cellC.value;
-          if (valueC !== null && valueC !== undefined) {
+          // C列：直接使用源单元格的值（保留Date对象），并复制格式
+          if (cellC.value !== null && cellC.value !== undefined) {
             const targetCellC = this.targetSheet.getCell(row, 3);
-            targetCellC.value = valueC;
+            targetCellC.value = cellC.value;
+            // 使用style API设置日期格式
+            targetCellC.style = {
+              numFmt: cellC.numFmt
+            };
+            console.log(`  C列格式已设置: ${cellC.numFmt}, 值: ${JSON.stringify(cellC.value)}, 值类型: ${typeof cellC.value}, 是否为Date: ${cellC.value instanceof Date}`);
           }
 
           // D列：使用解析后的数值
           if (mapping.valueD !== null) {
             const targetCellD = this.targetSheet.getCell(row, 4);
             targetCellD.value = mapping.valueD;
+            // 使用style API设置为通用格式
+            targetCellD.style = {
+              numFmt: 'General'
+            };
+            console.log(`  D列已填充值: ${mapping.valueD}`);
           }
 
           // N列：使用解析后的数值
           if (mapping.valueN !== null) {
             const targetCellN = this.targetSheet.getCell(row, 14);
             targetCellN.value = mapping.valueN;
+            // 使用style API设置为通用格式
+            targetCellN.style = {
+              numFmt: 'General'
+            };
+            console.log(`  N列已填充值: ${mapping.valueN}`);
           }
 
-          console.log(`已填充: C${row}=${valueC}, D${row}=${mapping.valueD}, N${row}=${mapping.valueN}`);
+          console.log(`已填充: C${row}=${mapping.valueC}, D${row}=${mapping.valueD}, N${row}=${mapping.valueN}`);
         } else {
           console.log(`匹配失败: ${orgName}`);
         }
@@ -192,24 +220,29 @@ export class CreditMatcher {
   /**
    * 解析单元格值（处理公式对象和日期对象）
    */
-  private parseCellValue(value: any): number | null {
+  private parseCellValue(value: any): any {
     if (value === null || value === undefined || value === '') {
       return null;
     }
 
+    // 如果是Date对象，直接返回（保留日期格式）
+    if (value instanceof Date) {
+      console.log(`    parseCellValue: 检测到Date对象 - ${value.toISOString()}`);
+      return value;
+    }
+
+    // 如果是数字，直接返回
     if (typeof value === 'number') {
       return value;
     }
 
+    // 处理公式结果对象
     if (typeof value === 'object' && value !== null && 'result' in value) {
       const result = (value as any).result;
-      return typeof result === 'number' ? result : null;
+      return result !== undefined && result !== null ? result : null;
     }
 
-    if (value instanceof Date) {
-      return value.getTime();
-    }
-
+    // 尝试转换为数字
     const num = parseFloat(String(value).trim());
     return isNaN(num) ? null : num;
   }

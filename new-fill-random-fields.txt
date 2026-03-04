@@ -1,0 +1,74 @@
+/**
+ * 填充随机字段名称和数值（新版 - 支持集团表）
+ */
+private fillRandomFields(): void {
+  console.log('=== 开始填充随机字段名称 ===');
+
+  // 收集所有机构的字段名称和数值
+  const allFieldNames = new Set<string>();
+  const fieldValuesByOrg = new Map<string, Map<number, { value: number; sourceSheet: string }>>();
+
+  for (const mapping of this.mappings) {
+    if (mapping.matched && mapping.sourceRowIndex > 0) {
+      // 确定机构匹配的源表
+      const sourceSheet = mapping.sourceSheet === '集团' ? this.sourceSheet集团 : this.sourceSheet单体;
+      if (!sourceSheet) continue;
+      
+      const headerRow = sourceSheet.getRow(3);
+      const sourceRow = sourceSheet.getRow(mapping.sourceRowIndex);
+      
+      // 集团表从F列开始（6），单体表从E列开始（5）
+      const startCol = mapping.sourceSheet === '集团' ? 6 : 5;
+      const endCol = mapping.sourceSheet === '集团' ? 29 : 28; // 集团表多一列
+
+      // 收集字段名称和数值
+      for (let col = startCol; col <= endCol; col++) {
+        const fieldNameCell = headerRow.getCell(col);
+        const fieldName = String(fieldNameCell.value || '').trim();
+        
+        if (!fieldName) continue;
+        
+        allFieldNames.add(fieldName);
+        
+        const valueCell = sourceRow.getCell(col);
+        const value = this.parseCellValue(valueCell.value);
+        
+        if (value !== null && value !== 0) {
+          if (!fieldValuesByOrg.has(fieldName)) {
+            fieldValuesByOrg.set(fieldName, new Map());
+          }
+          fieldValuesByOrg.get(fieldName)!.set(mapping.sourceRowIndex, {
+            value: value,
+            sourceSheet: mapping.sourceSheet || '单体'
+          });
+        }
+      }
+    }
+  }
+
+  console.log(`共找到 ${allFieldNames.size} 个唯一字段名称`);
+  console.log(`字段列表:`, Array.from(allFieldNames));
+
+  // 确定字段列表：固定字段（有数值的）和随机字段
+  const fixedFields = Array.from(fieldValuesByOrg.keys());
+  const randomFieldsCandidates = Array.from(allFieldNames).filter(name => !fieldValuesByOrg.has(name));
+  const randomFieldsNeeded = Math.max(0, 9 - fixedFields.length);
+  const selectedRandomFields = randomFieldsCandidates.sort(() => Math.random() - 0.5).slice(0, randomFieldsNeeded);
+  
+  const allFieldsToFill = [...fixedFields, ...selectedRandomFields];
+  console.log(`最终填充字段数: ${allFieldsToFill.length}`);
+
+  // 填充第5行和各机构的数值行
+  const matchedData = this.mappings
+    .filter(m => m.matched && m.sourceRowIndex > 0)
+    .map(m => ({
+      targetRow: m.targetRowIndex,
+      orgName: m.orgName,
+      sourceRow: m.sourceRowIndex,
+      sourceSheet: m.sourceSheet || '单体'
+    }));
+
+  this.fillSharedFieldsAndValues(matchedData, allFieldsToFill, fieldValuesByOrg);
+
+  console.log('=== 随机字段填充完成 ===');
+}

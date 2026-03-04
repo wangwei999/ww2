@@ -329,97 +329,70 @@ export class CreditMatcher {
   private fillRandomFields(): void {
     console.log('=== 开始填充随机字段名称 ===');
 
-    // 1. 获取A文件第3行（字段名）和第4-173行（数据）
-    const headerRow = this.sourceSheet单体.getRow(3);
-    const fieldNames: string[] = [];
-    for (let col = 5; col <= 28; col++) { // E列(5)到AB列(28)
-      const cell = headerRow.getCell(col);
-      const value = String(cell.value || '').trim();
-      if (value) {
-        fieldNames.push(value);
-      }
-    }
-    console.log(`A文件E3-AB3共找到 ${fieldNames.length} 个字段名`);
-
-    // 2. 查找所有匹配成功的机构及其数值（按字段名称统计）
-    const matchedData: Array<{
-      targetRow: number;
-      orgName: string;
-      sourceRow: number;
-      fieldValueMap: Map<string, number>; // 字段名称 -> 数值
-    }> = [];
-
-    // 统计每个字段是否至少有一个机构有数值
-    const fieldHasValueSet = new Set<string>();
-    // 记录每个字段的值（按机构）
-    const fieldValuesByOrg = new Map<string, Map<number, number>>(); // 字段名称 -> Map<源行, 数值>
+    // 收集所有机构的字段名称和数值
+    const allFieldNames = new Set<string>();
+    const fieldValuesByOrg = new Map<string, Map<number, { value: number; sourceSheet: string }>>();
 
     for (const mapping of this.mappings) {
       if (mapping.matched && mapping.sourceRowIndex > 0) {
-        // 获取机构匹配的源表
+        // 确定机构匹配的源表
         const sourceSheet = mapping.sourceSheet === '集团' ? this.sourceSheet集团 : this.sourceSheet单体;
         if (!sourceSheet) continue;
         
+        const headerRow = sourceSheet.getRow(3);
         const sourceRow = sourceSheet.getRow(mapping.sourceRowIndex);
-        const fieldValueMap = new Map<string, number>();
+        
+        // 集团表从F列开始（6），单体表从E列开始（5）
+        const startCol = mapping.sourceSheet === '集团' ? 6 : 5;
+        const endCol = mapping.sourceSheet === '集团' ? 29 : 28; // 集团表多一列
 
-        // 检查E列到AB列的数值
-        for (let col = 5; col <= 28; col++) { // E列(5)到AB列(28)
-          const cell = sourceRow.getCell(col);
-          const value = this.parseCellValue(cell.value);
+        // 收集字段名称和数值
+        for (let col = startCol; col <= endCol; col++) {
+          const fieldNameCell = headerRow.getCell(col);
+          const fieldName = String(fieldNameCell.value || '').trim();
           
-          const fieldName = fieldNames[col - 5] || `字段${col}`;
+          if (!fieldName) continue;
+          
+          allFieldNames.add(fieldName);
+          
+          const valueCell = sourceRow.getCell(col);
+          const value = this.parseCellValue(valueCell.value);
           
           if (value !== null && value !== 0) {
-            // 记录该机构在此字段的值
-            fieldValueMap.set(fieldName, value);
-            
-            // 标记该字段有数值
-            fieldHasValueSet.add(fieldName);
-            
-            // 记录该字段的值（按机构）
             if (!fieldValuesByOrg.has(fieldName)) {
               fieldValuesByOrg.set(fieldName, new Map());
             }
-            fieldValuesByOrg.get(fieldName)!.set(mapping.sourceRowIndex, value);
+            fieldValuesByOrg.get(fieldName)!.set(mapping.sourceRowIndex, {
+              value: value,
+              sourceSheet: mapping.sourceSheet || '单体'
+            });
           }
         }
-
-        matchedData.push({
-          targetRow: mapping.targetRowIndex,
-          orgName: mapping.orgName,
-          sourceRow: mapping.sourceRowIndex,
-          fieldValueMap
-        });
-        console.log(`机构: ${mapping.orgName} (目标行${mapping.targetRowIndex}, 源表:${mapping.sourceSheet || '单体'}), 有数值字段数: ${fieldValueMap.size}`);
       }
     }
 
-    console.log(`共找到 ${matchedData.length} 个有数值的机构`);
-    console.log(`共有 ${fieldHasValueSet.size} 个字段至少有一个机构有数值`);
+    console.log(`共找到 ${allFieldNames.size} 个唯一字段名称`);
+    console.log(`字段列表:`, Array.from(allFieldNames));
 
-    // 3. 确定字段列表
-    // 固定字段：至少有一个机构有数值的字段
-    const fixedFields = Array.from(fieldHasValueSet);
-    console.log(`固定字段数: ${fixedFields.length}`, fixedFields);
+    // 确定字段列表：固定字段（有数值的）和随机字段
+    const fixedFields = Array.from(fieldValuesByOrg.keys());
+    const randomFieldsCandidates = Array.from(allFieldNames).filter(name => !fieldValuesByOrg.has(name));
+    const randomFieldsNeeded = Math.max(0, 9 - fixedFields.length);
+    const selectedRandomFields = randomFieldsCandidates.sort(() => Math.random() - 0.5).slice(0, randomFieldsNeeded);
     
-    // 随机字段：所有机构都没有数值的字段
-    const allFieldNamesSet = new Set(fieldNames);
-    const randomFieldsCandidates = fieldNames.filter(name => !fieldHasValueSet.has(name));
-    console.log(`可用随机字段数: ${randomFieldsCandidates.length}`);
-    
-    // 计算需要多少随机字段（最多9个）
-    const totalSlots = 9; // E5-M5共9个单元格
-    const randomFieldsNeeded = Math.max(0, totalSlots - fixedFields.length);
-    const selectedRandomFields = randomFieldsCandidates
-      .sort(() => Math.random() - 0.5)
-      .slice(0, randomFieldsNeeded);
-    
-    // 合并固定字段和随机字段
     const allFieldsToFill = [...fixedFields, ...selectedRandomFields];
-    console.log(`最终填充字段数: ${allFieldsToFill.length}`, allFieldsToFill);
+    console.log(`最终填充字段数: ${allFieldsToFill.length}`);
 
-    // 4. 填充第5行（字段名称行，所有机构共享）和每个机构的数值行
+    // 填充第5行和各机构的数值行
+    const matchedData = this.mappings
+      .filter(m => m.matched && m.sourceRowIndex > 0)
+      .map(m => ({
+        targetRow: m.targetRowIndex,
+        orgName: m.orgName,
+        sourceRow: m.sourceRowIndex,
+        sourceSheet: m.sourceSheet || '单体'
+      }));
+
     this.fillSharedFieldsAndValues(matchedData, allFieldsToFill, fieldValuesByOrg);
 
     console.log('=== 随机字段填充完成 ===');
@@ -435,10 +408,10 @@ export class CreditMatcher {
       targetRow: number;
       orgName: string;
       sourceRow: number;
-      fieldValueMap: Map<string, number>;
+      sourceSheet: string;
     }>,
     fieldNames: string[],
-    fieldValuesByOrg: Map<string, Map<number, number>>
+    fieldValuesByOrg: Map<string, Map<number, { value: number; sourceSheet: string }>>
   ): void {
     console.log('\\n=== 开始填充共享字段和各机构数值 ===');
 
@@ -472,23 +445,32 @@ export class CreditMatcher {
 
     // 2. 为每个机构填充对应的数值行
     for (const orgData of matchedData) {
-      const { targetRow, orgName, sourceRow } = orgData;
-      console.log(`\\n填充机构 ${orgName} (目标行${targetRow}) 的数值:`);
+      const { targetRow, orgName, sourceRow, sourceSheet } = orgData;
+      console.log(`\\n填充机构 ${orgName} (目标行${targetRow}, 源表:${sourceSheet}) 的数值:`);
+
+      // 确定源表
+      const sourceSheetObj = sourceSheet === '集团' ? this.sourceSheet集团 : this.sourceSheet单体;
+      if (!sourceSheetObj) {
+        console.log(`  警告: 找不到源表 ${sourceSheet}`);
+        continue;
+      }
+
+      // 确定源表的列起始位置
+      const startCol = sourceSheet === '集团' ? 6 : 5;
 
       for (let i = 0; i < Math.min(fieldNames.length, targetColumns.length); i++) {
         const col = shuffledColumns[i];
         const fieldName = fieldNames[i];
         
-        // 查找该机构在此字段的值
         const valueCell = this.targetSheet.getCell(targetRow, col);
         const fieldValues = fieldValuesByOrg.get(fieldName);
-        const value = fieldValues?.get(sourceRow);
+        const valueInfo = fieldValues?.get(sourceRow);
 
-        if (value !== undefined) {
-          valueCell.value = value;
-          console.log(`  ${String.fromCharCode(64 + col)}${targetRow}: ${value}`);
+        if (valueInfo && valueInfo.value !== undefined) {
+          valueCell.value = valueInfo.value;
+          console.log(`  ${String.fromCharCode(64 + col)}${targetRow}: ${valueInfo.value} (从${valueInfo.sourceSheet})`);
         } else {
-          valueCell.value = null; // 该机构在此字段无数值
+          valueCell.value = null;
           console.log(`  ${String.fromCharCode(64 + col)}${targetRow}: (空)`);
         }
         

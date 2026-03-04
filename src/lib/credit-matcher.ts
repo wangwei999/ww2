@@ -268,122 +268,116 @@ export class CreditMatcher {
     }
     console.log(`A文件E3-AB3共找到 ${fieldNames.length} 个字段名`);
 
-    // 2. 查找所有匹配成功的机构及其非零数值字段
+    // 2. 查找所有匹配成功的机构及其数值（按字段名称统计）
     const matchedData: Array<{
       targetRow: number;
       orgName: string;
       sourceRow: number;
-      nonZeroFields: Array<{ name: string; value: number; sourceCol: number }>;
+      fieldValueMap: Map<string, number>; // 字段名称 -> 数值
     }> = [];
 
-    // 用于收集所有机构的非零字段（用于去重）
-    const allNonZeroFieldsMap = new Map<string, Array<{ value: number; sourceRow: number; sourceCol: number }>>();
+    // 统计每个字段是否至少有一个机构有数值
+    const fieldHasValueSet = new Set<string>();
+    // 记录每个字段的值（按机构）
+    const fieldValuesByOrg = new Map<string, Map<number, number>>(); // 字段名称 -> Map<源行, 数值>
 
     for (const mapping of this.mappings) {
       if (mapping.matched && mapping.sourceRowIndex > 0) {
         const sourceRow = this.sourceSheet.getRow(mapping.sourceRowIndex);
-        const nonZeroFields: Array<{ name: string; value: number; sourceCol: number }> = [];
+        const fieldValueMap = new Map<string, number>();
 
         // 检查E列到AB列的数值
         for (let col = 5; col <= 28; col++) { // E列(5)到AB列(28)
           const cell = sourceRow.getCell(col);
           const value = this.parseCellValue(cell.value);
           
+          const fieldName = fieldNames[col - 5] || `字段${col}`;
+          
           if (value !== null && value !== 0) {
-            const fieldName = fieldNames[col - 5] || `字段${col}`;
+            // 记录该机构在此字段的值
+            fieldValueMap.set(fieldName, value);
             
-            // 添加到机构的非零字段列表
-            nonZeroFields.push({
-              name: fieldName,
-              value: value,
-              sourceCol: col
-            });
+            // 标记该字段有数值
+            fieldHasValueSet.add(fieldName);
             
-            // 添加到全局字段映射（按字段名称分组）
-            if (!allNonZeroFieldsMap.has(fieldName)) {
-              allNonZeroFieldsMap.set(fieldName, []);
+            // 记录该字段的值（按机构）
+            if (!fieldValuesByOrg.has(fieldName)) {
+              fieldValuesByOrg.set(fieldName, new Map());
             }
-            allNonZeroFieldsMap.get(fieldName)!.push({
-              value: value,
-              sourceRow: mapping.sourceRowIndex,
-              sourceCol: col
-            });
+            fieldValuesByOrg.get(fieldName)!.set(mapping.sourceRowIndex, value);
           }
         }
 
-        if (nonZeroFields.length > 0) {
-          matchedData.push({
-            targetRow: mapping.targetRowIndex,
-            orgName: mapping.orgName,
-            sourceRow: mapping.sourceRowIndex,
-            nonZeroFields
-          });
-          console.log(`机构: ${mapping.orgName} (目标行${mapping.targetRowIndex}), 非零字段数: ${nonZeroFields.length}`);
-        }
+        matchedData.push({
+          targetRow: mapping.targetRowIndex,
+          orgName: mapping.orgName,
+          sourceRow: mapping.sourceRowIndex,
+          fieldValueMap
+        });
+        console.log(`机构: ${mapping.orgName} (目标行${mapping.targetRowIndex}), 有数值字段数: ${fieldValueMap.size}`);
       }
     }
 
-    console.log(`共找到 ${matchedData.length} 个有非零数值的机构`);
-    console.log(`共找到 ${allNonZeroFieldsMap.size} 个唯一的字段名称`);
+    console.log(`共找到 ${matchedData.length} 个有数值的机构`);
+    console.log(`共有 ${fieldHasValueSet.size} 个字段至少有一个机构有数值`);
 
-    // 3. 随机选择最多9个唯一的字段名称（确保不重复）
-    const uniqueFieldNames = Array.from(allNonZeroFieldsMap.keys());
-    const shuffledUniqueFields = uniqueFieldNames.sort(() => Math.random() - 0.5);
-    const selectedFields = shuffledUniqueFields.slice(0, 9);
+    // 3. 确定字段列表
+    // 固定字段：至少有一个机构有数值的字段
+    const fixedFields = Array.from(fieldHasValueSet);
+    console.log(`固定字段数: ${fixedFields.length}`, fixedFields);
     
-    console.log(`选择了 ${selectedFields.length} 个唯一的字段名称:`, selectedFields);
+    // 随机字段：所有机构都没有数值的字段
+    const allFieldNamesSet = new Set(fieldNames);
+    const randomFieldsCandidates = fieldNames.filter(name => !fieldHasValueSet.has(name));
+    console.log(`可用随机字段数: ${randomFieldsCandidates.length}`);
+    
+    // 计算需要多少随机字段（最多9个）
+    const totalSlots = 9; // E5-M5共9个单元格
+    const randomFieldsNeeded = Math.max(0, totalSlots - fixedFields.length);
+    const selectedRandomFields = randomFieldsCandidates
+      .sort(() => Math.random() - 0.5)
+      .slice(0, randomFieldsNeeded);
+    
+    // 合并固定字段和随机字段
+    const allFieldsToFill = [...fixedFields, ...selectedRandomFields];
+    console.log(`最终填充字段数: ${allFieldsToFill.length}`, allFieldsToFill);
 
-    // 4. 为每个匹配成功的机构填充选中的字段
-    for (const data of matchedData) {
-      this.fillFieldsWithSelectedNames(data, selectedFields, allNonZeroFieldsMap, fieldNames);
-    }
+    // 4. 填充第5行（字段名称行，所有机构共享）和每个机构的数值行
+    this.fillSharedFieldsAndValues(matchedData, allFieldsToFill, fieldValuesByOrg);
 
     console.log('=== 随机字段填充完成 ===');
   }
 
   /**
-   * 为单个机构填充选中的字段名称和数值（所有机构使用相同的字段名称）
+   * 填充共享字段名称和各机构的数值
+   * 第5行：共享的字段名称
+   * 每个机构的行：对应的数值
    */
-  private fillFieldsWithSelectedNames(
-    data: {
+  private fillSharedFieldsAndValues(
+    matchedData: Array<{
       targetRow: number;
       orgName: string;
       sourceRow: number;
-    },
-    selectedFields: string[],
-    allNonZeroFieldsMap: Map<string, Array<{ value: number; sourceRow: number; sourceCol: number }>>,
-    allFieldNames: string[]
+      fieldValueMap: Map<string, number>;
+    }>,
+    fieldNames: string[],
+    fieldValuesByOrg: Map<string, Map<number, number>>
   ): void {
-    const { targetRow, sourceRow } = data;
-    console.log(`\\n=== 为 ${data.orgName} (目标行${targetRow}, 源行${sourceRow}) 填充选中的字段 ===`);
+    console.log('\\n=== 开始填充共享字段和各机构数值 ===');
 
     // B文件E-M列（5-13列）
     const targetColumns = [5, 6, 7, 8, 9, 10, 11, 12, 13]; // E-M列
-    const totalSlots = targetColumns.length; // 9个单元格
-
+    
     // 随机打乱列顺序
     const shuffledColumns = [...targetColumns].sort(() => Math.random() - 0.5);
 
-    // 1. 构建该机构的字段值映射
-    const fieldValueMap = new Map<string, number | null>();
-    for (const fieldName of selectedFields) {
-      const allValues = allNonZeroFieldsMap.get(fieldName) || [];
-      // 查找该机构对应的值
-      const orgValue = allValues.find(v => v.sourceRow === sourceRow);
-      fieldValueMap.set(fieldName, orgValue?.value || null);
-    }
-
-    // 2. 随机打乱字段顺序
-    const shuffledFields = [...selectedFields].sort(() => Math.random() - 0.5);
-
-    // 3. 填充字段名称和数值
-    for (let i = 0; i < Math.min(shuffledFields.length, totalSlots); i++) {
+    // 1. 填充第5行（字段名称行，所有机构共享）
+    console.log('\\n填充第5行（字段名称）:');
+    for (let i = 0; i < Math.min(fieldNames.length, targetColumns.length); i++) {
       const col = shuffledColumns[i];
-      const fieldName = shuffledFields[i];
-      const value = fieldValueMap.get(fieldName) || null;
-
-      // 填充字段名称到目标行（带自动换行和边框）
-      const nameCell = this.targetSheet.getCell(targetRow, col);
+      const fieldName = fieldNames[i];
+      
+      const nameCell = this.targetSheet.getCell(5, col);
       nameCell.value = fieldName;
       nameCell.style = {
         numFmt: 'General',
@@ -395,101 +389,68 @@ export class CreditMatcher {
           right: { style: 'thin' }
         }
       };
+      
+      console.log(`  ${String.fromCharCode(64 + col)}5: ${fieldName}`);
+    }
 
-      // 填充数值到目标行+1（带边框）
-      const valueCell = this.targetSheet.getCell(targetRow + 1, col);
-      if (value !== null) {
-        valueCell.value = value;
+    // 2. 为每个机构填充对应的数值行
+    for (const orgData of matchedData) {
+      const { targetRow, orgName, sourceRow } = orgData;
+      console.log(`\\n填充机构 ${orgName} (目标行${targetRow}) 的数值:`);
+
+      for (let i = 0; i < Math.min(fieldNames.length, targetColumns.length); i++) {
+        const col = shuffledColumns[i];
+        const fieldName = fieldNames[i];
+        
+        // 查找该机构在此字段的值
+        const valueCell = this.targetSheet.getCell(targetRow, col);
+        const fieldValues = fieldValuesByOrg.get(fieldName);
+        const value = fieldValues?.get(sourceRow);
+
+        if (value !== undefined) {
+          valueCell.value = value;
+          console.log(`  ${String.fromCharCode(64 + col)}${targetRow}: ${value}`);
+        } else {
+          valueCell.value = null; // 该机构在此字段无数值
+          console.log(`  ${String.fromCharCode(64 + col)}${targetRow}: (空)`);
+        }
+        
+        valueCell.style = {
+          numFmt: 'General',
+          border: {
+            top: { style: 'thin' },
+            left: { style: 'thin' },
+            bottom: { style: 'thin' },
+            right: { style: 'thin' }
+          }
+        };
       }
-      valueCell.style = {
-        numFmt: 'General',
-        border: {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
-        }
-      };
-
-      console.log(`  ${String.fromCharCode(64 + col)}${targetRow}: ${fieldName}, ${String.fromCharCode(64 + col)}${targetRow + 1}: ${value}`);
     }
 
-    // 4. 填充剩余的空单元格（从所有字段名称中随机选择，排除已选择的）
-    const remainingSlots = shuffledColumns.slice(shuffledFields.length);
-    const usedFieldNames = new Set(selectedFields);
-    const availableFieldNames = allFieldNames.filter(name => !usedFieldNames.has(name));
-
-    // 随机打乱可用字段名称
-    const shuffledAvailableFields = availableFieldNames.sort(() => Math.random() - 0.5);
-
-    for (let i = 0; i < remainingSlots.length; i++) {
-      const col = remainingSlots[i];
-      const fieldName = shuffledAvailableFields[i] || `字段${col}`;
-
-      // 只填充字段名称到目标行（带自动换行和边框），目标行+1保持空（带边框）
-      const nameCell = this.targetSheet.getCell(targetRow, col);
-      nameCell.value = fieldName;
-      nameCell.style = {
-        numFmt: 'General',
-        alignment: { wrapText: true },
-        border: {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
-        }
-      };
-
-      // 目标行+1为空，但也要添加边框
-      const emptyCell = this.targetSheet.getCell(targetRow + 1, col);
-      emptyCell.style = {
-        numFmt: 'General',
-        border: {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
-        }
-      };
-
-      console.log(`  ${String.fromCharCode(64 + col)}${targetRow}: ${fieldName} (无数值)`);
-    }
-
-    // 5. 复制E[targetRow]-M[targetRow+1]到O[targetRow]-W[targetRow+1]（偏移10列）
-    console.log(`\\n复制E${targetRow}-M${targetRow + 1}到O${targetRow}-W${targetRow + 1}...`);
-    for (let col = 5; col <= 13; col++) { // E-M列
-      const targetCol = col + 10; // O-W列（E+10=O=15, M+10=W=23）
-      
-      // 复制目标行（字段名称，带自动换行和边框）
-      const nameCell = this.targetSheet.getCell(targetRow, col);
-      const copyNameCell = this.targetSheet.getCell(targetRow, targetCol);
+    // 3. 复制第5行（字段名称）到O5-W5
+    console.log('\\n复制第5行到O5-W5:');
+    for (let col = 5; col <= 13; col++) {
+      const targetCol = col + 10;
+      const nameCell = this.targetSheet.getCell(5, col);
+      const copyNameCell = this.targetSheet.getCell(5, targetCol);
       copyNameCell.value = nameCell.value;
-      copyNameCell.style = {
-        numFmt: 'General',
-        alignment: { wrapText: true },
-        border: {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
-        }
-      };
-      
-      // 复制目标行+1（数值，带边框）
-      const valueCell = this.targetSheet.getCell(targetRow + 1, col);
-      const copyValueCell = this.targetSheet.getCell(targetRow + 1, targetCol);
-      copyValueCell.value = valueCell.value;
-      copyValueCell.style = {
-        numFmt: 'General',
-        border: {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
-        }
-      };
-      
-      console.log(`  ${String.fromCharCode(64 + targetCol)}${targetRow}: ${nameCell.value}, ${String.fromCharCode(64 + targetCol)}${targetRow + 1}: ${valueCell.value}`);
+      copyNameCell.style = nameCell.style;
+      console.log(`  ${String.fromCharCode(64 + targetCol)}5: ${nameCell.value}`);
+    }
+
+    // 4. 复制各机构的数值行到O-W区域
+    for (const orgData of matchedData) {
+      const { targetRow, orgName } = orgData;
+      console.log(`\\n复制机构 ${orgName} (目标行${targetRow}) 的数值到O-W区域:`);
+
+      for (let col = 5; col <= 13; col++) {
+        const targetCol = col + 10;
+        const valueCell = this.targetSheet.getCell(targetRow, col);
+        const copyValueCell = this.targetSheet.getCell(targetRow, targetCol);
+        copyValueCell.value = valueCell.value;
+        copyValueCell.style = valueCell.style;
+        console.log(`  ${String.fromCharCode(64 + targetCol)}${targetRow}: ${valueCell.value}`);
+      }
     }
   }
 }

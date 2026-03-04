@@ -5,6 +5,7 @@ import path from 'path';
 import * as XLSX from 'xlsx';
 import { FileParser } from '@/lib/file-parser';
 import { BatchDataMatcher } from '@/lib/data-matcher';
+import { CreditMatcher } from '@/lib/credit-matcher';
 import { excelDateToString, isExcelDate } from '@/lib/excel-date-utils';
 import { adjustToMonthEnd } from '@/lib/data-utils';
 
@@ -296,89 +297,140 @@ export async function POST(request: NextRequest) {
     console.log('文件B包含"授信"?', fileBName.includes('授信'));
     console.log('是否启用特殊模式:', isSpecialMode);
     
-    // 批量匹配
-    // 根据需求：如果文件B包含"单位：万元 %"字样，则保持原始格式（不进行单位转换和百分比格式化）
-    const keepOriginalFormat = parseResultB.keepOriginalFormat || false;
-    console.log('=== 原始格式检测 ===');
-    console.log('文件B包含"单位：万元 %"?', !!parseResultB.keepOriginalFormat);
-    console.log('是否保持原始格式:', keepOriginalFormat);
-    console.log('源文件单位:', parseResultA.unit || '万元');
-    console.log('目标文件单位:', keepOriginalFormat ? '万元' : '亿元');
+    let filledTable: any;
+    let allMatchResults: any[] = [];
+    let statistics: any = {};
     
-    const matcher = new BatchDataMatcher(
-      parseResultA.tables,
-      selectedTablesB,  // 使用选择的表格
-      parseResultA.unit || '万元',  // 源文件默认为万元
-      keepOriginalFormat ? '万元' : '亿元',  // 如果保持原始格式，则输出为万元，否则为亿元
-      parseResultA.tables[0]?.hasPercentage,
-      selectedTableB?.hasPercentage,
-      isSpecialMode  // 传递特殊模式标志
-    );
-    
-    console.log('开始数据匹配...');
-    const { results } = matcher.matchAll();
-    
-    // 统计信息
-    let totalFilled = 0;
-    let totalConverted = 0;
-    
-    results.forEach((result, index) => {
-      console.log(`表格 ${index + 1} 匹配完成:`, result.statistics);
-      totalFilled += result.statistics.totalFilled;
-      totalConverted += result.statistics.convertedCount;
-    });
-    
-    // 提取填充后的表格
-    const filledTables = results.map(r => r.filledTable);
-    
-    console.log('准备保存表格，数量:', filledTables.length);
-    
-    // 打印第一个表格的详细信息
-    if (filledTables.length > 0) {
-      console.log('第一个表格 headers:', filledTables[0].headers);
-      console.log('第一个表格 rows 数量:', filledTables[0].rows?.length);
-      if (filledTables[0].rows && filledTables[0].rows.length > 0) {
-        console.log('第一个表格第一行数据:', filledTables[0].rows[0]);
+    // 授信模式处理
+    if (isSpecialMode) {
+      console.log('=== 启用授信模式匹配 ===');
+      
+      // 读取原始workbook（需要保留原始格式和所有工作表）
+      const fileABytes = await fileA.arrayBuffer();
+      const fileBBytes = await fileB.arrayBuffer();
+      
+      const workbookA = XLSX.read(fileABytes);
+      const workbookB = XLSX.read(fileBBytes);
+      
+      // 创建授信模式匹配器
+      const creditMatcher = new CreditMatcher(workbookA, workbookB);
+      
+      // 执行匹配
+      const { filledTable: filled, mappings, statistics: stats } = creditMatcher.matchAndFill();
+      filledTable = filled;
+      allMatchResults = mappings;
+      statistics = {
+        totalFilled: stats.matchedCount,
+        convertedCount: 0,
+        fillRate: stats.totalOrganizations > 0 ? (stats.matchedCount / stats.totalOrganizations) * 100 : 0,
+        mode: '授信模式',
+        matchedCount: stats.matchedCount,
+        unmatchedCount: stats.unmatchedCount,
+      };
+      
+      console.log('授信模式匹配完成:', statistics);
+    } else {
+      // 常规模式处理
+      console.log('=== 启用常规模式匹配 ===');
+      
+      // 批量匹配
+      // 根据需求：如果文件B包含"单位：万元 %"字样，则保持原始格式（不进行单位转换和百分比格式化）
+      const keepOriginalFormat = parseResultB.keepOriginalFormat || false;
+      console.log('=== 原始格式检测 ===');
+      console.log('文件B包含"单位：万元 %"?', !!parseResultB.keepOriginalFormat);
+      console.log('是否保持原始格式:', keepOriginalFormat);
+      console.log('源文件单位:', parseResultA.unit || '万元');
+      console.log('目标文件单位:', keepOriginalFormat ? '万元' : '亿元');
+      
+      const matcher = new BatchDataMatcher(
+        parseResultA.tables,
+        selectedTablesB,  // 使用选择的表格
+        parseResultA.unit || '万元',  // 源文件默认为万元
+        keepOriginalFormat ? '万元' : '亿元',  // 如果保持原始格式，则输出为万元，否则为亿元
+        parseResultA.tables[0]?.hasPercentage,
+        selectedTableB?.hasPercentage,
+        isSpecialMode  // 传递特殊模式标志
+      );
+      
+      console.log('开始数据匹配...');
+      const { results } = matcher.matchAll();
+      
+      // 统计信息
+      let totalFilled = 0;
+      let totalConverted = 0;
+      
+      results.forEach((result, index) => {
+        console.log(`表格 ${index + 1} 匹配完成:`, result.statistics);
+        totalFilled += result.statistics.totalFilled;
+        totalConverted += result.statistics.convertedCount;
+      });
+      
+      // 提取填充后的表格
+      const filledTables = results.map(r => r.filledTable);
+      
+      console.log('准备保存表格，数量:', filledTables.length);
+      
+      // 打印第一个表格的详细信息
+      if (filledTables.length > 0) {
+        console.log('第一个表格 headers:', filledTables[0].headers);
+        console.log('第一个表格 rows 数量:', filledTables[0].rows?.length);
+        if (filledTables[0].rows && filledTables[0].rows.length > 0) {
+          console.log('第一个表格第一行数据:', filledTables[0].rows[0]);
+        }
       }
+      
+      // 验证表格数据
+      if (filledTables.length === 0) {
+        throw new Error('没有可保存的表格数据');
+      }
+      
+      // 合并所有表格为一个（如果有多个表格）
+      if (filledTables.length > 1) {
+        console.log('检测到多个表格，将合并为一个表格');
+        // 使用第一个表格的结构，合并所有行的数据
+        const mergedRows = [...filledTables[0].rows];
+        for (let i = 1; i < filledTables.length; i++) {
+          const table = filledTables[i];
+          if (table.rows && table.rows.length > 0) {
+            mergedRows.push(...table.rows);
+          }
+          // 合并 matchResults
+          if (results[i]?.matchResults) {
+            allMatchResults.push(...results[i].matchResults);
+          }
+        }
+        if (results[0]?.matchResults) {
+          allMatchResults.push(...results[0].matchResults);
+        }
+        filledTable = {
+          ...filledTables[0],
+          rows: mergedRows,
+        };
+        console.log('合并后的表格行数:', filledTable.rows.length);
+      } else {
+        // 只有一个表格，直接使用其 matchResults
+        filledTable = filledTables[0];
+        if (results[0]?.matchResults) {
+          allMatchResults = results[0].matchResults;
+        }
+      }
+      
+      statistics = {
+        totalFilled,
+        convertedCount: totalConverted,
+        fillRate: filledTable.rows.length > 0 ? (totalFilled / (filledTable.rows.length * (filledTable.headers.length - 1))) * 100 : 0,
+        mode: '常规模式',
+      };
     }
     
     // 验证表格数据
-    if (filledTables.length === 0) {
+    if (!filledTable) {
       throw new Error('没有可保存的表格数据');
     }
     
-    // 合并所有表格为一个（如果有多个表格）
-    let finalTable = filledTables[0];
-    let allMatchResults: any[] = [];
-    
-    if (filledTables.length > 1) {
-      console.log('检测到多个表格，将合并为一个表格');
-      // 使用第一个表格的结构，合并所有行的数据
-      const mergedRows = [...finalTable.rows];
-      for (let i = 1; i < filledTables.length; i++) {
-        const table = filledTables[i];
-        if (table.rows && table.rows.length > 0) {
-          mergedRows.push(...table.rows);
-        }
-        // 合并 matchResults
-        if (results[i]?.matchResults) {
-          allMatchResults.push(...results[i].matchResults);
-        }
-      }
-      if (results[0]?.matchResults) {
-        allMatchResults.push(...results[0].matchResults);
-      }
-      finalTable = {
-        ...finalTable,
-        rows: mergedRows,
-      };
-      console.log('合并后的表格行数:', finalTable.rows.length);
-    } else {
-      // 只有一个表格，直接使用其 matchResults
-      if (results[0]?.matchResults) {
-        allMatchResults = results[0].matchResults;
-      }
-    }
+    console.log('准备保存表格');
+    console.log('表格 headers:', filledTable.headers);
+    console.log('表格 rows 数量:', filledTable.rows?.length);
     
     // 保存结果（统一保存为 XLSX 格式，便于后续编辑和查看）
     // 注意：无论输入文件是 XLSX 还是 DOCX，输出统一为 XLSX 格式
@@ -387,22 +439,20 @@ export async function POST(request: NextRequest) {
     console.log('生成的文件ID:', fileId);
     console.log('注意：输出格式统一为 XLSX，便于查看和编辑');
     
-    const savedFilename = saveAsExcel([finalTable], fileId, allMatchResults, keepOriginalFormat);
+    // 授信模式不需要keepOriginalFormat参数，默认为false
+    const keepOriginalFormat = parseResultB.keepOriginalFormat || false;
+    const savedFilename = saveAsExcel([filledTable], fileId, allMatchResults, isSpecialMode ? false : keepOriginalFormat);
     
     console.log('文件保存成功:', savedFilename);
     
     return NextResponse.json({ 
       success: true, 
       fileId: savedFilename,
-      message: '处理完成',
+      message: isSpecialMode ? '授信模式处理完成' : '处理完成',
+      mode: isSpecialMode ? '授信模式' : '常规模式',
       outputFormat: 'xlsx',  // 明确说明输出格式
       originalFormat: fileB.name.split('.').pop(),  // 原始格式
-      statistics: {
-        totalFilled,
-        totalConverted,
-        tableCount: 1,  // 现在总是保存为一个表格
-        mergedTables: filledTables.length > 1 ? filledTables.length : undefined,
-      }
+      statistics
     });
   } catch (error) {
     console.error('处理错误:', error);

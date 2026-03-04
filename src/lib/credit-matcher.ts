@@ -233,9 +233,20 @@ export class CreditMatcher {
           if (cellC.value !== null && cellC.value !== undefined) {
             const targetCellC = this.targetSheet.getCell(row, 3);
             targetCellC.value = cellC.value;
-            // 使用style API设置日期格式
+            // 使用style API设置日期格式和边框
             targetCellC.style = {
-              numFmt: cellC.numFmt
+              numFmt: cellC.numFmt,
+              border: {
+                top: { style: 'thin' },
+                left: { style: 'thin' },
+                bottom: { style: 'thin' },
+                right: { style: 'thin' }
+              },
+              fill: {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FFFFFFFF' }
+              }
             };
             console.log(`  C列格式已设置: ${cellC.numFmt}, 值: ${JSON.stringify(cellC.value)}, 值类型: ${typeof cellC.value}, 是否为Date: ${cellC.value instanceof Date}`);
           }
@@ -244,9 +255,20 @@ export class CreditMatcher {
           if (mapping.valueD !== null) {
             const targetCellD = this.targetSheet.getCell(row, 4);
             targetCellD.value = mapping.valueD;
-            // 使用style API设置为通用格式
+            // 使用style API设置通用格式和边框
             targetCellD.style = {
-              numFmt: 'General'
+              numFmt: 'General',
+              border: {
+                top: { style: 'thin' },
+                left: { style: 'thin' },
+                bottom: { style: 'thin' },
+                right: { style: 'thin' }
+              },
+              fill: {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FFFFFFFF' }
+              }
             };
             console.log(`  D列已填充值: ${mapping.valueD}`);
           }
@@ -255,9 +277,20 @@ export class CreditMatcher {
           if (mapping.valueN !== null) {
             const targetCellN = this.targetSheet.getCell(row, 14);
             targetCellN.value = mapping.valueN;
-            // 使用style API设置为通用格式
+            // 使用style API设置为通用格式和边框
             targetCellN.style = {
-              numFmt: 'General'
+              numFmt: 'General',
+              border: {
+                top: { style: 'thin' },
+                left: { style: 'thin' },
+                bottom: { style: 'thin' },
+                right: { style: 'thin' }
+              },
+              fill: {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FFFFFFFF' }
+              }
             };
             console.log(`  N列已填充值: ${mapping.valueN}`);
           }
@@ -437,6 +470,11 @@ export class CreditMatcher {
           left: { style: 'thin' },
           bottom: { style: 'thin' },
           right: { style: 'thin' }
+        },
+        fill: {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFFFFFFF' }
         }
       };
       
@@ -481,6 +519,11 @@ export class CreditMatcher {
             left: { style: 'thin' },
             bottom: { style: 'thin' },
             right: { style: 'thin' }
+          },
+          fill: {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFFFFFFF' }
           }
         };
       }

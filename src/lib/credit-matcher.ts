@@ -8,7 +8,7 @@ export interface OrganizationMapping {
   sourceRowIndex: number;  // 源文件中的行索引（从1开始，Excel行号）
   orgName: string;         // 机构名称
   matched: boolean;        // 是否匹配成功
-  valueC: number | null;   // C列的值（原授信时间）
+  valueC: any;             // C列的值（原授信时间，可能是Date对象）
   valueD: number | null;   // D列的值（原授信-授信总额）
   valueN: number | null;   // N列的值（拟调整授信-授信总额）
 }
@@ -124,12 +124,16 @@ export class CreditMatcher {
           mapping.matched = true;
           mapping.sourceRowIndex = sourceRowIndex;
 
-          // 从源文件获取数值
+          // 从源文件获取值（保留原始类型）
           const cellC = this.sourceSheet.getCell(sourceRowIndex, 3); // C列
           const cellD = this.sourceSheet.getCell(sourceRowIndex, 4); // D列
 
-          mapping.valueC = this.parseNumber(cellC.value);
-          mapping.valueD = this.parseNumber(cellD.value);
+          console.log(`  源C列type: ${cellC.type}, 源D列type: ${cellD.type}`);
+
+          // 处理C列：保留日期对象（用于统计，不用于填充）
+          mapping.valueC = this.parseCellValue(cellC.value);
+          // 处理D列：可能是公式对象
+          mapping.valueD = this.parseCellValue(cellD.value);
           mapping.valueN = mapping.valueD;
 
           console.log(`匹配成功: ${orgName}`);
@@ -137,11 +141,26 @@ export class CreditMatcher {
           console.log(`  C列值: ${mapping.valueC}, D列值: ${mapping.valueD}, N列值: ${mapping.valueN}`);
 
           // 直接修改目标workbook的单元格（exceljs会保留格式）
-          this.updateTargetCell(row, 3, mapping.valueC); // C列（列索引为3）
-          this.updateTargetCell(row, 4, mapping.valueD); // D列（列索引为4）
-          this.updateTargetCell(row, 14, mapping.valueN); // N列（列索引为14）
+          // C列：保留原始日期对象（cellC.value是Date对象或Excel日期数字）
+          const valueC = cellC.value;
+          if (valueC !== null && valueC !== undefined) {
+            const targetCellC = this.targetSheet.getCell(row, 3);
+            targetCellC.value = valueC; // 使用原始值，保留日期类型
+          }
 
-          console.log(`已填充: C${row}=${mapping.valueC}, D${row}=${mapping.valueD}, N${row}=${mapping.valueN}`);
+          // D列：使用解析后的数值
+          if (mapping.valueD !== null) {
+            const targetCellD = this.targetSheet.getCell(row, 4);
+            targetCellD.value = mapping.valueD;
+          }
+
+          // N列：使用解析后的数值
+          if (mapping.valueN !== null) {
+            const targetCellN = this.targetSheet.getCell(row, 14);
+            targetCellN.value = mapping.valueN;
+          }
+
+          console.log(`已填充: C${row}=${valueC}, D${row}=${mapping.valueD}, N${row}=${mapping.valueN}`);
         } else {
           console.log(`匹配失败: ${orgName}`);
         }
@@ -175,9 +194,9 @@ export class CreditMatcher {
   private updateTargetCell(
     rowIndex: number,
     colIndex: number,
-    value: number | null
+    value: any
   ): void {
-    if (value === null) return;
+    if (value === null || value === undefined) return;
 
     const cell = this.targetSheet.getCell(rowIndex, colIndex);
     cell.value = value;
@@ -185,17 +204,30 @@ export class CreditMatcher {
   }
 
   /**
-   * 解析数值
+   * 解析单元格值（处理公式对象和日期对象）
    */
-  private parseNumber(value: any): number | null {
+  private parseCellValue(value: any): number | null {
     if (value === null || value === undefined || value === '') {
       return null;
     }
 
+    // 如果是数字，直接返回
     if (typeof value === 'number') {
       return value;
     }
 
+    // 如果是公式对象（{result: number, sharedFormula: string}），提取result
+    if (typeof value === 'object' && value !== null && 'result' in value) {
+      const result = (value as any).result;
+      return typeof result === 'number' ? result : null;
+    }
+
+    // 如果是日期对象，转换为时间戳数字（用于统计）
+    if (value instanceof Date) {
+      return value.getTime();
+    }
+
+    // 尝试解析字符串为数字
     const num = parseFloat(String(value).trim());
     return isNaN(num) ? null : num;
   }

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { writeFile, mkdir } from 'fs/promises';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { writeFile, mkdir, readFile, unlink } from 'fs/promises';
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import path from 'path';
 import * as XLSX from 'xlsx';
+import * as ExcelJS from 'exceljs';
 import { FileParser } from '@/lib/file-parser';
 import { BatchDataMatcher } from '@/lib/data-matcher';
 import { CreditMatcher } from '@/lib/credit-matcher';
@@ -221,16 +222,16 @@ function saveAsExcel(tables: any[], filename: string, matchResults: any[] = [], 
 }
 
 /**
- * 直接保存 workbook（保留原始格式）
- * @param workbook Excel workbook 对象
+ * 直接保存 exceljs workbook（保留原始格式）
+ * @param workbook ExcelJS.Workbook 对象
  * @param filename 文件名
  */
-function saveWorkbook(workbook: XLSX.WorkBook, filename: string): string {
-  console.log('=== 开始保存 Workbook（保留原始格式）===');
+async function saveWorkbook(workbook: ExcelJS.Workbook, filename: string): Promise<string> {
+  console.log('=== 开始保存 ExcelJS Workbook（保留原始格式）===');
   console.log('原始文件名:', filename);
   console.log('TEMP_DIR:', TEMP_DIR);
   console.log('TEMP_DIR 存在:', existsSync(TEMP_DIR));
-  console.log('Workbooks 包含工作表:', workbook.SheetNames);
+  console.log('Workbooks 包含工作表:', workbook.worksheets.map(ws => ws.name));
   
   // 清理文件名
   const safeFilename = sanitizeFilename(filename);
@@ -246,17 +247,9 @@ function saveWorkbook(workbook: XLSX.WorkBook, filename: string): string {
       mkdirSync(TEMP_DIR, { recursive: true });
     }
     
-    // 使用 XLSX.write 生成 buffer
-    console.log('生成 Excel buffer...');
-    const buffer = XLSX.write(workbook, { 
-      type: 'buffer', 
-      bookType: 'xlsx',
-      bookSST: false,  // 不使用共享字符串表，保留原始格式
-      compression: false,  // 不压缩，便于调试
-    });
-    
-    console.log('写入文件...');
-    writeFileSync(filePath, buffer);
+    // 使用 exceljs 保存文件（保留所有格式）
+    console.log('保存 Excel 文件...');
+    await workbook.xlsx.writeFile(filePath);
     
     console.log('文件保存成功');
     return safeFilename;
@@ -270,11 +263,7 @@ function saveWorkbook(workbook: XLSX.WorkBook, filename: string): string {
     console.log('尝试使用备用文件名:', fallbackFilename);
     
     try {
-      const buffer = XLSX.write(workbook, { 
-        type: 'buffer', 
-        bookType: 'xlsx' 
-      });
-      writeFileSync(fallbackPath, buffer);
+      await workbook.xlsx.writeFile(fallbackPath);
       console.log('备用文件保存成功');
       return fallbackFilename;
     } catch (fallbackError) {
@@ -362,27 +351,45 @@ export async function POST(request: NextRequest) {
     console.log('是否启用特殊模式:', isSpecialMode);
     
     let filledTable: any;
-    let filledWorkbook: XLSX.WorkBook | undefined;
+    let filledWorkbook: ExcelJS.Workbook | undefined;
     let allMatchResults: any[] = [];
     let statistics: any = {};
     
     // 授信模式处理
     if (isSpecialMode) {
-      console.log('=== 启用授信模式匹配 ===');
+      console.log('=== 启用授信模式匹配（使用exceljs）===');
       
-      // 读取原始workbook（需要保留原始格式和所有工作表）
-      const fileABytes = await fileA.arrayBuffer();
-      const fileBBytes = await fileB.arrayBuffer();
+      // 保存上传的文件到临时位置
+      const tempDir = path.join(process.cwd(), 'temp');
+      if (!existsSync(tempDir)) {
+        mkdirSync(tempDir, { recursive: true });
+      }
       
-      const workbookA = XLSX.read(fileABytes);
-      const workbookB = XLSX.read(fileBBytes);
+      const tempFileA = path.join(tempDir, `temp_${Date.now()}_A.xlsx`);
+      const tempFileB = path.join(tempDir, `temp_${Date.now()}_B.xlsx`);
+      
+      await writeFile(tempFileA, Buffer.from(await fileA.arrayBuffer()));
+      await writeFile(tempFileB, Buffer.from(await fileB.arrayBuffer()));
+      
+      console.log('临时文件已保存:', tempFileA, tempFileB);
+      
+      // 使用exceljs读取文件（保留原始格式）
+      const workbookA = new ExcelJS.Workbook();
+      const workbookB = new ExcelJS.Workbook();
+      
+      await workbookA.xlsx.readFile(tempFileA);
+      await workbookB.xlsx.readFile(tempFileB);
+      
+      console.log('使用exceljs读取文件完成');
+      console.log('源文件工作表:', workbookA.worksheets.map(ws => ws.name));
+      console.log('目标文件工作表:', workbookB.worksheets.map(ws => ws.name));
       
       // 创建授信模式匹配器
       const creditMatcher = new CreditMatcher(workbookA, workbookB);
       
       // 执行匹配并直接修改B文件workbook
-      const { workbook, mappings, statistics: stats } = creditMatcher.matchAndFill();
-      filledWorkbook = workbook; // 保存修改后的workbook
+      const { workbook, mappings, statistics: stats } = await creditMatcher.matchAndFill();
+      filledWorkbook = workbook; // 保存修改后的workbook（exceljs.Workbook）
       allMatchResults = mappings;
       statistics = {
         totalFilled: stats.matchedCount,
@@ -394,6 +401,15 @@ export async function POST(request: NextRequest) {
       };
       
       console.log('授信模式匹配完成:', statistics);
+      
+      // 清理临时文件
+      try {
+        await unlink(tempFileA);
+        await unlink(tempFileB);
+        console.log('临时文件已清理');
+      } catch (e) {
+        console.error('清理临时文件失败:', e);
+      }
     } else {
       // 常规模式处理
       console.log('=== 启用常规模式匹配 ===');
@@ -519,7 +535,7 @@ export async function POST(request: NextRequest) {
       if (!filledWorkbook) {
         throw new Error('授信模式：没有可保存的workbook');
       }
-      savedFilename = saveWorkbook(filledWorkbook, fileId);
+      savedFilename = await saveWorkbook(filledWorkbook, fileId);
       console.log('授信模式：已保存workbook（保留原始格式）');
     } else {
       // 常规模式：使用saveAsExcel

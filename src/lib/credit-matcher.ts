@@ -1,11 +1,11 @@
-import * as XLSX from 'xlsx';
+import * as ExcelJS from 'exceljs';
 
 /**
  * 机构映射信息
  */
 export interface OrganizationMapping {
-  targetRowIndex: number;  // 目标文件中的行索引（从0开始）
-  sourceRowIndex: number;  // 源文件中的行索引（从0开始）
+  targetRowIndex: number;  // 目标文件中的行索引（从1开始，Excel行号）
+  sourceRowIndex: number;  // 源文件中的行索引（从1开始，Excel行号）
   orgName: string;         // 机构名称
   matched: boolean;        // 是否匹配成功
   valueC: number | null;   // C列的值（原授信时间）
@@ -14,7 +14,7 @@ export interface OrganizationMapping {
 }
 
 /**
- * 授信模式匹配器
+ * 授信模式匹配器（使用exceljs保留原始格式）
  *
  * 规则：
  * 1. B文件（目标）：第5行是字段行，B6开始是机构名称
@@ -24,92 +24,94 @@ export interface OrganizationMapping {
  *    - A文件D列X行 → B文件D列对应行
  *    - A文件D列X行 → B文件N列对应行
  *
- * 特点：直接修改B文件的workbook，保留原始格式（样式、合并单元格、公式等）
+ * 特点：使用exceljs直接修改B文件，保留原始格式（样式、合并单元格、公式等）
  */
 export class CreditMatcher {
-  private sourceWorkbook: XLSX.WorkBook;
-  private targetWorkbook: XLSX.WorkBook;
-  private targetSheetName: string;
+  private sourceWorkbook: ExcelJS.Workbook;
+  private targetWorkbook: ExcelJS.Workbook;
+  private targetSheet: ExcelJS.Worksheet;
+  private sourceSheet: ExcelJS.Worksheet;
   private mappings: OrganizationMapping[] = [];
 
   constructor(
-    sourceWorkbook: XLSX.WorkBook,
-    targetWorkbook: XLSX.WorkBook,
+    sourceWorkbook: ExcelJS.Workbook,
+    targetWorkbook: ExcelJS.Workbook,
     targetSheetName?: string
   ) {
     this.sourceWorkbook = sourceWorkbook;
     this.targetWorkbook = targetWorkbook;
+    
     // 默认使用第一个工作表，如果指定了工作表名则使用指定的工作表
-    this.targetSheetName = targetSheetName || targetWorkbook.SheetNames[0];
+    const sheetName = targetSheetName || targetWorkbook.worksheets[0]?.name;
+    if (!sheetName) {
+      throw new Error('目标文件中没有工作表');
+    }
+    
+    const targetSheet = targetWorkbook.getWorksheet(sheetName);
+    if (!targetSheet) {
+      throw new Error(`目标文件中未找到工作表：${sheetName}`);
+    }
+    this.targetSheet = targetSheet as ExcelJS.Worksheet;
 
-    console.log('=== CreditMatcher 初始化 ===');
-    console.log('源文件工作表:', sourceWorkbook.SheetNames);
-    console.log('目标文件工作表:', targetWorkbook.SheetNames);
-    console.log('目标工作表:', this.targetSheetName);
+    // 获取源文件的"单体"工作表
+    const sourceSheetName = '单体';
+    const sourceSheet = sourceWorkbook.getWorksheet(sourceSheetName);
+    if (!sourceSheet) {
+      throw new Error(`源文件中未找到"${sourceSheetName}"工作表`);
+    }
+    this.sourceSheet = sourceSheet as ExcelJS.Worksheet;
+
+    console.log('=== CreditMatcher 初始化（使用exceljs）===');
+    console.log('源文件工作表:', sourceWorkbook.worksheets.map(ws => ws.name));
+    console.log('目标文件工作表:', targetWorkbook.worksheets.map(ws => ws.name));
+    console.log('目标工作表:', this.targetSheet.name);
+    console.log('源工作表:', this.sourceSheet.name);
   }
 
   /**
    * 执行匹配并直接修改目标workbook
    */
-  public matchAndFill(): {
-    workbook: XLSX.WorkBook;
+  public async matchAndFill(): Promise<{
+    workbook: ExcelJS.Workbook;
     mappings: OrganizationMapping[];
     statistics: {
       totalOrganizations: number;
       matchedCount: number;
       unmatchedCount: number;
     };
-  } {
-    console.log('=== 开始授信模式匹配（直接修改B文件）===');
+  }> {
+    console.log('=== 开始授信模式匹配（使用exceljs保留格式）===');
 
-    // 获取源文件"单体"工作表的数据
-    const sourceSheetName = '单体';
-    if (!this.sourceWorkbook.SheetNames.includes(sourceSheetName)) {
-      throw new Error(`源文件中未找到"${sourceSheetName}"工作表`);
-    }
-
-    const sourceSheet = this.sourceWorkbook.Sheets[sourceSheetName];
-    const sourceData = XLSX.utils.sheet_to_json<TableCell[]>(sourceSheet, {
-      header: 1,
-      defval: null,
-      raw: true,
-    });
-
-    // 获取目标工作表的数据
-    const targetSheet = this.targetWorkbook.Sheets[this.targetSheetName];
-    const targetData = XLSX.utils.sheet_to_json<TableCell[]>(targetSheet, {
-      header: 1,
-      defval: null,
-      raw: true,
-    });
-
-    console.log('源表格（单体）数据行数:', sourceData.length);
-    console.log('目标表格数据行数:', targetData.length);
-
-    // 构建源文件的机构名称索引（B列，从第4行开始，索引3）
+    // 构建源文件的机构名称索引（B列，从第4行开始）
     const sourceOrgMap = new Map<string, number>();
-    sourceData.slice(3).forEach((row, idx) => {
-      const orgName = String(row[1] || '').trim(); // B列
+    const sourceRowCount = this.sourceSheet.rowCount;
+    
+    console.log('源文件总行数:', sourceRowCount);
+    
+    for (let row = 4; row <= sourceRowCount; row++) {
+      const cell = this.sourceSheet.getCell(row, 2); // B列（列索引为2）
+      const orgName = String(cell.value || '').trim();
+      
       if (orgName && orgName !== '机构名称') {
-        const actualRowIndex = idx + 3; // 实际行索引（从0开始）
-        sourceOrgMap.set(orgName, actualRowIndex);
+        sourceOrgMap.set(orgName, row);
       }
-    });
+    }
 
     console.log('源文件机构索引大小:', sourceOrgMap.size);
 
-    // 遍历目标文件的机构（B列，从第6行开始，索引5）
-    this.targetSheetName = this.targetWorkbook.SheetNames[0];
-    targetData.slice(5).forEach((row, idx) => {
-      const orgName = String(row[1] || '').trim(); // B列
+    // 遍历目标文件的机构（B列，从第6行开始）
+    const targetRowCount = this.targetSheet.rowCount;
+    console.log('目标文件总行数:', targetRowCount);
 
-      // 只处理有机构名称的行（从第5行开始，即idx >= 5）
-      if (orgName && orgName !== '机构名称' && idx >= 5) {
-        const targetRowIndex = idx + 5; // 实际行索引（从0开始）
+    for (let row = 6; row <= targetRowCount; row++) {
+      const cell = this.targetSheet.getCell(row, 2); // B列（列索引为2）
+      const orgName = String(cell.value || '').trim();
+
+      if (orgName && orgName !== '机构名称') {
         const sourceRowIndex = sourceOrgMap.get(orgName);
 
         const mapping: OrganizationMapping = {
-          targetRowIndex,
+          targetRowIndex: row,
           sourceRowIndex: -1,
           orgName,
           matched: false,
@@ -123,32 +125,30 @@ export class CreditMatcher {
           mapping.sourceRowIndex = sourceRowIndex;
 
           // 从源文件获取数值
-          const sourceRow = sourceData[sourceRowIndex];
-          mapping.valueC = this.parseNumber(sourceRow[2]); // C列
-          mapping.valueD = this.parseNumber(sourceRow[3]); // D列
-          // N列的值是D列的值（根据规则）
+          const cellC = this.sourceSheet.getCell(sourceRowIndex, 3); // C列
+          const cellD = this.sourceSheet.getCell(sourceRowIndex, 4); // D列
+
+          mapping.valueC = this.parseNumber(cellC.value);
+          mapping.valueD = this.parseNumber(cellD.value);
           mapping.valueN = mapping.valueD;
 
           console.log(`匹配成功: ${orgName}`);
-          console.log(`  目标行: ${targetRowIndex + 1} (B${targetRowIndex + 1})`);
-          console.log(`  源行: ${sourceRowIndex + 1} (B${sourceRowIndex + 4})`);
-          console.log(`  C列值: ${mapping.valueC}`);
-          console.log(`  D列值: ${mapping.valueD}`);
-          console.log(`  N列值: ${mapping.valueN}`);
+          console.log(`  目标行: ${row} (B${row}), 源行: ${sourceRowIndex} (B${sourceRowIndex})`);
+          console.log(`  C列值: ${mapping.valueC}, D列值: ${mapping.valueD}, N列值: ${mapping.valueN}`);
 
-          // 直接修改目标workbook的单元格
-          this.updateTargetCell(targetSheet, targetRowIndex, 2, mapping.valueC); // C列
-          this.updateTargetCell(targetSheet, targetRowIndex, 3, mapping.valueD); // D列
-          this.updateTargetCell(targetSheet, targetRowIndex, 13, mapping.valueN); // N列
+          // 直接修改目标workbook的单元格（exceljs会保留格式）
+          this.updateTargetCell(row, 3, mapping.valueC); // C列（列索引为3）
+          this.updateTargetCell(row, 4, mapping.valueD); // D列（列索引为4）
+          this.updateTargetCell(row, 14, mapping.valueN); // N列（列索引为14）
 
-          console.log(`已填充: C${targetRowIndex + 1}=${mapping.valueC}, D${targetRowIndex + 1}=${mapping.valueD}, N${targetRowIndex + 1}=${mapping.valueN}`);
+          console.log(`已填充: C${row}=${mapping.valueC}, D${row}=${mapping.valueD}, N${row}=${mapping.valueN}`);
         } else {
           console.log(`匹配失败: ${orgName}`);
         }
 
         this.mappings.push(mapping);
       }
-    });
+    }
 
     // 统计
     const statistics = {
@@ -170,49 +170,33 @@ export class CreditMatcher {
   }
 
   /**
-   * 更新目标workbook的单元格
+   * 更新目标workbook的单元格（exceljs保留格式）
    */
   private updateTargetCell(
-    sheet: XLSX.WorkSheet,
     rowIndex: number,
     colIndex: number,
     value: number | null
   ): void {
     if (value === null) return;
 
-    // 将行列索引转换为单元格地址（例如：C6, D6, N6）
-    const cellAddress = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
-
-    // 如果单元格存在，只修改值，保留格式
-    if (sheet[cellAddress]) {
-      sheet[cellAddress].v = value;
-      // 确保数据类型是数字
-      sheet[cellAddress].t = 'n';
-    } else {
-      // 如果单元格不存在，创建新单元格
-      sheet[cellAddress] = {
-        v: value,
-        t: 'n', // 数字类型
-      };
-    }
+    const cell = this.targetSheet.getCell(rowIndex, colIndex);
+    cell.value = value;
+    // exceljs会自动保留原有的格式、样式等
   }
 
   /**
    * 解析数值
    */
-  private parseNumber(cell: TableCell): number | null {
-    if (cell === null || cell === undefined || cell === '') {
+  private parseNumber(value: any): number | null {
+    if (value === null || value === undefined || value === '') {
       return null;
     }
 
-    if (typeof cell === 'number') {
-      return cell;
+    if (typeof value === 'number') {
+      return value;
     }
 
-    const num = parseFloat(String(cell).trim());
+    const num = parseFloat(String(value).trim());
     return isNaN(num) ? null : num;
   }
 }
-
-// 类型定义
-type TableCell = string | number | null | undefined;

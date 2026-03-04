@@ -276,6 +276,9 @@ export class CreditMatcher {
       nonZeroFields: Array<{ name: string; value: number; sourceCol: number }>;
     }> = [];
 
+    // 用于收集所有机构的非零字段（用于去重）
+    const allNonZeroFieldsMap = new Map<string, Array<{ value: number; sourceRow: number; sourceCol: number }>>();
+
     for (const mapping of this.mappings) {
       if (mapping.matched && mapping.sourceRowIndex > 0) {
         const sourceRow = this.sourceSheet.getRow(mapping.sourceRowIndex);
@@ -288,9 +291,21 @@ export class CreditMatcher {
           
           if (value !== null && value !== 0) {
             const fieldName = fieldNames[col - 5] || `字段${col}`;
+            
+            // 添加到机构的非零字段列表
             nonZeroFields.push({
               name: fieldName,
               value: value,
+              sourceCol: col
+            });
+            
+            // 添加到全局字段映射（按字段名称分组）
+            if (!allNonZeroFieldsMap.has(fieldName)) {
+              allNonZeroFieldsMap.set(fieldName, []);
+            }
+            allNonZeroFieldsMap.get(fieldName)!.push({
+              value: value,
+              sourceRow: mapping.sourceRowIndex,
               sourceCol: col
             });
           }
@@ -309,29 +324,38 @@ export class CreditMatcher {
     }
 
     console.log(`共找到 ${matchedData.length} 个有非零数值的机构`);
+    console.log(`共找到 ${allNonZeroFieldsMap.size} 个唯一的字段名称`);
 
-    // 3. 为每个匹配成功的机构填充随机字段
+    // 3. 随机选择最多9个唯一的字段名称（确保不重复）
+    const uniqueFieldNames = Array.from(allNonZeroFieldsMap.keys());
+    const shuffledUniqueFields = uniqueFieldNames.sort(() => Math.random() - 0.5);
+    const selectedFields = shuffledUniqueFields.slice(0, 9);
+    
+    console.log(`选择了 ${selectedFields.length} 个唯一的字段名称:`, selectedFields);
+
+    // 4. 为每个匹配成功的机构填充选中的字段
     for (const data of matchedData) {
-      this.fillFieldsForOrganization(data, fieldNames);
+      this.fillFieldsWithSelectedNames(data, selectedFields, allNonZeroFieldsMap, fieldNames);
     }
 
     console.log('=== 随机字段填充完成 ===');
   }
 
   /**
-   * 为单个机构填充随机字段名称和数值
+   * 为单个机构填充选中的字段名称和数值（所有机构使用相同的字段名称）
    */
-  private fillFieldsForOrganization(
+  private fillFieldsWithSelectedNames(
     data: {
       targetRow: number;
       orgName: string;
       sourceRow: number;
-      nonZeroFields: Array<{ name: string; value: number; sourceCol: number }>;
     },
-    fieldNames: string[]
+    selectedFields: string[],
+    allNonZeroFieldsMap: Map<string, Array<{ value: number; sourceRow: number; sourceCol: number }>>,
+    allFieldNames: string[]
   ): void {
-    const { targetRow, nonZeroFields } = data;
-    console.log(`\\n=== 为 ${data.orgName} (目标行${targetRow}) 填充随机字段 ===`);
+    const { targetRow, sourceRow } = data;
+    console.log(`\\n=== 为 ${data.orgName} (目标行${targetRow}, 源行${sourceRow}) 填充选中的字段 ===`);
 
     // B文件E-M列（5-13列）
     const targetColumns = [5, 6, 7, 8, 9, 10, 11, 12, 13]; // E-M列
@@ -340,21 +364,27 @@ export class CreditMatcher {
     // 随机打乱列顺序
     const shuffledColumns = [...targetColumns].sort(() => Math.random() - 0.5);
 
-    // 1. 选择非零字段名称（最多9个，但非零字段可能不足）
-    const selectedNonZeroFields = nonZeroFields.slice(0, Math.min(nonZeroFields.length, totalSlots));
-    console.log(`选择了 ${selectedNonZeroFields.length} 个非零字段`);
+    // 1. 构建该机构的字段值映射
+    const fieldValueMap = new Map<string, number | null>();
+    for (const fieldName of selectedFields) {
+      const allValues = allNonZeroFieldsMap.get(fieldName) || [];
+      // 查找该机构对应的值
+      const orgValue = allValues.find(v => v.sourceRow === sourceRow);
+      fieldValueMap.set(fieldName, orgValue?.value || null);
+    }
 
-    // 2. 随机打乱非零字段
-    const shuffledNonZeroFields = selectedNonZeroFields.sort(() => Math.random() - 0.5);
+    // 2. 随机打乱字段顺序
+    const shuffledFields = [...selectedFields].sort(() => Math.random() - 0.5);
 
-    // 3. 填充非零字段名称和数值
-    for (let i = 0; i < shuffledNonZeroFields.length; i++) {
+    // 3. 填充字段名称和数值
+    for (let i = 0; i < Math.min(shuffledFields.length, totalSlots); i++) {
       const col = shuffledColumns[i];
-      const field = shuffledNonZeroFields[i];
+      const fieldName = shuffledFields[i];
+      const value = fieldValueMap.get(fieldName) || null;
 
       // 填充字段名称到目标行（带自动换行和边框）
       const nameCell = this.targetSheet.getCell(targetRow, col);
-      nameCell.value = field.name;
+      nameCell.value = fieldName;
       nameCell.style = {
         numFmt: 'General',
         alignment: { wrapText: true },
@@ -368,7 +398,9 @@ export class CreditMatcher {
 
       // 填充数值到目标行+1（带边框）
       const valueCell = this.targetSheet.getCell(targetRow + 1, col);
-      valueCell.value = field.value;
+      if (value !== null) {
+        valueCell.value = value;
+      }
       valueCell.style = {
         numFmt: 'General',
         border: {
@@ -379,13 +411,13 @@ export class CreditMatcher {
         }
       };
 
-      console.log(`  ${String.fromCharCode(64 + col)}${targetRow}: ${field.name}, ${String.fromCharCode(64 + col)}${targetRow + 1}: ${field.value}`);
+      console.log(`  ${String.fromCharCode(64 + col)}${targetRow}: ${fieldName}, ${String.fromCharCode(64 + col)}${targetRow + 1}: ${value}`);
     }
 
     // 4. 填充剩余的空单元格（从所有字段名称中随机选择，排除已选择的）
-    const remainingSlots = shuffledColumns.slice(shuffledNonZeroFields.length);
-    const usedFieldNames = new Set(shuffledNonZeroFields.map(f => f.name));
-    const availableFieldNames = fieldNames.filter(name => !usedFieldNames.has(name));
+    const remainingSlots = shuffledColumns.slice(shuffledFields.length);
+    const usedFieldNames = new Set(selectedFields);
+    const availableFieldNames = allFieldNames.filter(name => !usedFieldNames.has(name));
 
     // 随机打乱可用字段名称
     const shuffledAvailableFields = availableFieldNames.sort(() => Math.random() - 0.5);

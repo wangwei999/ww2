@@ -283,6 +283,19 @@ export async function POST(request: NextRequest) {
     console.log('最终选择的文件B表格表头:', selectedTableB.headers);
     console.log('最终选择的文件B表格行数:', selectedTableB.rows.length);
     
+    // 检测是否为特殊模式（授信相关文件）
+    // 规则：当文件A和文件B文件名称中都含有"授信"字样时，启用特殊匹配规则
+    const fileAName = fileA.name || '';
+    const fileBName = fileB.name || '';
+    const isSpecialMode = fileAName.includes('授信') && fileBName.includes('授信');
+    
+    console.log('=== 特殊模式检测 ===');
+    console.log('文件A名称:', fileAName);
+    console.log('文件B名称:', fileBName);
+    console.log('文件A包含"授信"?', fileAName.includes('授信'));
+    console.log('文件B包含"授信"?', fileBName.includes('授信'));
+    console.log('是否启用特殊模式:', isSpecialMode);
+    
     // 批量匹配
     // 根据需求：如果文件B包含"单位：万元 %"字样，则保持原始格式（不进行单位转换和百分比格式化）
     const keepOriginalFormat = parseResultB.keepOriginalFormat || false;
@@ -298,7 +311,8 @@ export async function POST(request: NextRequest) {
       parseResultA.unit || '万元',  // 源文件默认为万元
       keepOriginalFormat ? '万元' : '亿元',  // 如果保持原始格式，则输出为万元，否则为亿元
       parseResultA.tables[0]?.hasPercentage,
-      selectedTableB?.hasPercentage
+      selectedTableB?.hasPercentage,
+      isSpecialMode  // 传递特殊模式标志
     );
     
     console.log('开始数据匹配...');
@@ -366,10 +380,12 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    // 保存结果（只保存一个表格）
+    // 保存结果（统一保存为 XLSX 格式，便于后续编辑和查看）
+    // 注意：无论输入文件是 XLSX 还是 DOCX，输出统一为 XLSX 格式
     const originalFilename = fileB.name.replace(/\.[^/.]+$/, ""); // 移除扩展名
     const fileId = `${Date.now()}_${originalFilename}.xlsx`;
     console.log('生成的文件ID:', fileId);
+    console.log('注意：输出格式统一为 XLSX，便于查看和编辑');
     
     const savedFilename = saveAsExcel([finalTable], fileId, allMatchResults, keepOriginalFormat);
     
@@ -379,6 +395,8 @@ export async function POST(request: NextRequest) {
       success: true, 
       fileId: savedFilename,
       message: '处理完成',
+      outputFormat: 'xlsx',  // 明确说明输出格式
+      originalFormat: fileB.name.split('.').pop(),  // 原始格式
       statistics: {
         totalFilled,
         totalConverted,

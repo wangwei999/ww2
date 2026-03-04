@@ -267,38 +267,62 @@ export class FileParser {
     $tables.each((index, tableElement) => {
       const $table = $(tableElement);
       
-      // 提取表头
-      const $headerRow = $table.find('tr').first();
-      const headers: string[] = [];
-      $headerRow.find('td, th').each((i, cell) => {
-        headers.push($(cell).text().trim());
-      });
+      // 提取所有行
+      const $rows = $table.find('tr');
+      const allRows: TableCell[][] = [];
       
-      // 提取数据行（跳过表头行）
-      const rows: TableCell[][] = [];
-      $table.find('tr').slice(1).each((i, rowElement) => {
+      $rows.each((i, rowElement) => {
         const $row = $(rowElement);
         const cells: TableCell[] = [];
+        
+        // 查找所有单元格（包括 td 和 th）
         $row.find('td, th').each((j, cellElement) => {
-          const cellText = $(cellElement).text().trim();
+          const $cell = $(cellElement);
+          let cellText = $cell.text().trim();
+          
+          // 处理空单元格
+          if (!cellText) {
+            cellText = '';
+          }
+          
           // 尝试转换为数字
-          const numValue = parseFloat(cellText);
-          cells.push(isNaN(numValue) ? cellText : numValue);
+          // 支持千位分隔符（如 1,234.56）和百分号（如 12.5%）
+          let numValue: number | string = cellText;
+          
+          // 移除千位分隔符
+          const cleanText = cellText.replace(/,/g, '');
+          
+          // 检查是否是百分数
+          if (cleanText.includes('%')) {
+            const numPart = cleanText.replace(/%/g, '').trim();
+            const parsedNum = parseFloat(numPart);
+            if (!isNaN(parsedNum)) {
+              numValue = parsedNum / 100;  // 转换为小数
+            }
+          } else {
+            // 普通数字
+            const parsedNum = parseFloat(cleanText);
+            if (!isNaN(parsedNum)) {
+              numValue = parsedNum;
+            }
+          }
+          
+          cells.push(numValue);
         });
         
-        // 只保留有数据的行
-        if (cells.some(cell => cell !== '' && cell !== null && cell !== undefined)) {
-          rows.push(cells);
-        }
+        allRows.push(cells);
       });
       
-      console.log(`parseWord - 表格 ${index + 1}:`);
-      console.log(`  表头列数: ${headers.length}`);
-      console.log(`  数据行数: ${rows.length}`);
-      console.log(`  表头: ${headers.slice(0, 5).join(', ')}...`);
-      
-      // 只保留有表头和数据的表格
-      if (headers.length > 0 && rows.length > 0) {
+      // 如果至少有2行（表头+数据），则认为是有效表格
+      if (allRows.length >= 2) {
+        const headers = allRows[0].map(h => String(h || ''));
+        const rows = allRows.slice(1);
+        
+        console.log(`parseWord - 表格 ${index + 1}:`);
+        console.log(`  表头列数: ${headers.length}`);
+        console.log(`  数据行数: ${rows.length}`);
+        console.log(`  表头: ${headers.slice(0, 5).join(', ')}${headers.length > 5 ? '...' : ''}`);
+        
         tables.push({
           headers,
           rows,
@@ -306,35 +330,81 @@ export class FileParser {
       }
     });
     
-    console.log('parseWord - 返回有效表格数量:', tables.length);
+    console.log('parseWord - 从 HTML 解析的有效表格数量:', tables.length);
     
-    // 如果没有找到表格，尝试使用备用方法
+    // 如果没有找到表格或表格太少，尝试使用备用方法
     if (tables.length === 0) {
-      console.log('parseWord - 未找到表格，尝试备用方法...');
-      const fallbackResult = await mammoth.extractRawText({ buffer });
-      const text = fallbackResult.value;
-      const lines = text.split('\n').filter(line => line.trim());
+      console.log('parseWord - 未找到表格，尝试备用方法（文本提取）...');
       
-      // 检测表格行（包含制表符或多个空格分隔）
-      const potentialTableRows = lines.filter(line => {
-        return line.includes('\t') || line.split(/\s{2,}/).length > 2;
-      });
-      
-      console.log('parseWord - 备用方法检测到潜在表格行数:', potentialTableRows.length);
-      
-      if (potentialTableRows.length > 1) {
-        const tableData = potentialTableRows.map(line => {
-          return line.split('\t').map(cell => cell.trim());
+      try {
+        const fallbackResult = await mammoth.extractRawText({ buffer });
+        const text = fallbackResult.value;
+        const lines = text.split('\n').filter(line => line.trim());
+        
+        console.log('parseWord - 备用方法：文本行数:', lines.length);
+        
+        // 检测表格行（支持制表符和多个空格分隔）
+        const potentialTableRows = lines.filter(line => {
+          // 至少有3个列，或者有明显的分隔符
+          const tabCount = (line.match(/\t/g) || []).length;
+          const spacesCount = (line.match(/\s{3,}/g) || []).length;
+          const cells = line.split(/[\t\s{3,}]/).map(c => c.trim()).filter(c => c);
+          
+          return cells.length >= 3 || tabCount > 0 || spacesCount > 0;
         });
         
-        const fallbackTable = this.createTableFromRawData(tableData);
-        if (fallbackTable.headers.length > 0 && fallbackTable.rows.length > 0) {
-          tables.push(fallbackTable);
+        console.log('parseWord - 备用方法：检测到潜在表格行数:', potentialTableRows.length);
+        
+        if (potentialTableRows.length > 1) {
+          // 尝试不同的分隔符
+          for (const separator of ['\t', /\s{3,}/, /[\t\s]+/]) {
+            try {
+              const tableData = potentialTableRows.map(line => {
+                const cells = typeof separator === 'string'
+                  ? line.split(separator).map(c => c.trim())
+                  : line.split(separator).map(c => c.trim());
+                
+                return cells.map(cell => {
+                  // 尝试转换为数字
+                  const cleanText = cell.replace(/,/g, '');
+                  if (cleanText.includes('%')) {
+                    const numPart = cleanText.replace(/%/g, '').trim();
+                    const parsedNum = parseFloat(numPart);
+                    return !isNaN(parsedNum) ? parsedNum / 100 : cell;
+                  } else {
+                    const parsedNum = parseFloat(cleanText);
+                    return !isNaN(parsedNum) ? parsedNum : cell;
+                  }
+                });
+              }).filter(row => row.length > 0);
+              
+              if (tableData.length >= 2) {
+                const fallbackTable = this.createTableFromRawData(tableData);
+                if (fallbackTable.headers.length > 0 && fallbackTable.rows.length > 0) {
+                  console.log('parseWord - 备用方法成功：使用分隔符', separator);
+                  tables.push(fallbackTable);
+                  break;
+                }
+              }
+            } catch (e) {
+              console.log('parseWord - 分隔符', separator, '解析失败:', e);
+              continue;
+            }
+          }
         }
+      } catch (e) {
+        console.error('parseWord - 备用方法失败:', e);
       }
     }
     
-    return tables;
+    console.log('parseWord - 最终返回表格数量:', tables.length);
+    
+    // 为每个表格添加解析来源标记
+    return tables.map((table, index) => ({
+      ...table,
+      source: 'docx-html',
+      tableIndex: index,
+    }));
   }
   
   /**

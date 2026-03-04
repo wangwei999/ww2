@@ -549,6 +549,7 @@ export class BatchDataMatcher {
   private targetUnit?: string;
   private sourceHasPercentage?: boolean;
   private targetHasPercentage?: boolean;
+  private isSpecialMode: boolean = false;  // 特殊模式标志（如授信文件）
   
   constructor(
     sourceTables: TableData[],
@@ -556,7 +557,8 @@ export class BatchDataMatcher {
     sourceUnit?: string,
     targetUnit?: string,
     sourceHasPercentage?: boolean,
-    targetHasPercentage?: boolean
+    targetHasPercentage?: boolean,
+    isSpecialMode?: boolean
   ) {
     this.sourceTables = sourceTables;
     this.targetTables = targetTables;
@@ -564,6 +566,14 @@ export class BatchDataMatcher {
     this.targetUnit = targetUnit;
     this.sourceHasPercentage = sourceHasPercentage;
     this.targetHasPercentage = targetHasPercentage;
+    this.isSpecialMode = isSpecialMode || false;
+    
+    console.log('=== BatchDataMatcher 初始化 ===');
+    console.log('特殊模式:', this.isSpecialMode);
+    if (this.isSpecialMode) {
+      console.log('⚠️ 已启用特殊模式，将禁用默认匹配规则');
+      // TODO: 等待用户提供新规则后实现特殊匹配逻辑
+    }
   }
   
   /**
@@ -582,7 +592,28 @@ export class BatchDataMatcher {
   } {
     const results = [];
     
-    // 为每个目标表格匹配源数据
+    // 特殊模式：禁用默认匹配规则，返回原始表格
+    if (this.isSpecialMode) {
+      console.log('=== 特殊模式：禁用默认匹配规则 ===');
+      console.log('⚠️ 特殊模式已启用，跳过所有字段匹配和数据填充');
+      console.log('返回原始表格，不做任何修改');
+      
+      for (const targetTable of this.targetTables) {
+        results.push({
+          filledTable: targetTable,  // 返回原始表格，不做任何修改
+          matchResults: [],
+          statistics: {
+            totalFilled: 0,
+            convertedCount: 0,
+            fillRate: 0,
+          },
+        });
+      }
+      
+      return { results };
+    }
+    
+    // 正常模式：执行批量匹配
     for (const targetTable of this.targetTables) {
       // 选择最佳匹配的源表格
       const bestSourceTable = this.findBestSourceTable(targetTable);

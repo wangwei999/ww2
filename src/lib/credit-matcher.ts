@@ -198,6 +198,9 @@ export class CreditMatcher {
       }
     }
 
+    // 填充随机字段名称和数值
+    this.fillRandomFields();
+
     // 统计
     const statistics = {
       totalOrganizations: this.mappings.length,
@@ -245,5 +248,141 @@ export class CreditMatcher {
     // 尝试转换为数字
     const num = parseFloat(String(value).trim());
     return isNaN(num) ? null : num;
+  }
+
+  /**
+   * 填充随机字段名称和数值
+   */
+  private fillRandomFields(): void {
+    console.log('=== 开始填充随机字段名称 ===');
+
+    // 1. 获取A文件第3行（字段名）和第4-173行（数据）
+    const headerRow = this.sourceSheet.getRow(3);
+    const fieldNames: string[] = [];
+    for (let col = 5; col <= 28; col++) { // E列(5)到AB列(28)
+      const cell = headerRow.getCell(col);
+      const value = String(cell.value || '').trim();
+      if (value) {
+        fieldNames.push(value);
+      }
+    }
+    console.log(`A文件E3-AB3共找到 ${fieldNames.length} 个字段名`);
+
+    // 2. 查找所有匹配成功的机构及其非零数值字段
+    const matchedData: Array<{
+      targetRow: number;
+      orgName: string;
+      sourceRow: number;
+      nonZeroFields: Array<{ name: string; value: number; sourceCol: number }>;
+    }> = [];
+
+    for (const mapping of this.mappings) {
+      if (mapping.matched && mapping.sourceRowIndex > 0) {
+        const sourceRow = this.sourceSheet.getRow(mapping.sourceRowIndex);
+        const nonZeroFields: Array<{ name: string; value: number; sourceCol: number }> = [];
+
+        // 检查E列到AB列的数值
+        for (let col = 5; col <= 28; col++) { // E列(5)到AB列(28)
+          const cell = sourceRow.getCell(col);
+          const value = this.parseCellValue(cell.value);
+          
+          if (value !== null && value !== 0) {
+            const fieldName = fieldNames[col - 5] || `字段${col}`;
+            nonZeroFields.push({
+              name: fieldName,
+              value: value,
+              sourceCol: col
+            });
+          }
+        }
+
+        if (nonZeroFields.length > 0) {
+          matchedData.push({
+            targetRow: mapping.targetRowIndex,
+            orgName: mapping.orgName,
+            sourceRow: mapping.sourceRowIndex,
+            nonZeroFields
+          });
+          console.log(`机构: ${mapping.orgName} (目标行${mapping.targetRowIndex}), 非零字段数: ${nonZeroFields.length}`);
+        }
+      }
+    }
+
+    console.log(`共找到 ${matchedData.length} 个有非零数值的机构`);
+
+    // 3. 为每个匹配成功的机构填充随机字段
+    for (const data of matchedData) {
+      this.fillFieldsForOrganization(data, fieldNames);
+    }
+
+    console.log('=== 随机字段填充完成 ===');
+  }
+
+  /**
+   * 为单个机构填充随机字段名称和数值
+   */
+  private fillFieldsForOrganization(
+    data: {
+      targetRow: number;
+      orgName: string;
+      sourceRow: number;
+      nonZeroFields: Array<{ name: string; value: number; sourceCol: number }>;
+    },
+    fieldNames: string[]
+  ): void {
+    const { targetRow, nonZeroFields } = data;
+    console.log(`\\n=== 为 ${data.orgName} (目标行${targetRow}) 填充随机字段 ===`);
+
+    // B文件E5-M5列（5-13列）
+    const targetColumns = [5, 6, 7, 8, 9, 10, 11, 12, 13]; // E-M列
+    const totalSlots = targetColumns.length; // 9个单元格
+
+    // 随机打乱列顺序
+    const shuffledColumns = [...targetColumns].sort(() => Math.random() - 0.5);
+
+    // 1. 选择非零字段名称（最多9个，但非零字段可能不足）
+    const selectedNonZeroFields = nonZeroFields.slice(0, Math.min(nonZeroFields.length, totalSlots));
+    console.log(`选择了 ${selectedNonZeroFields.length} 个非零字段`);
+
+    // 2. 随机打乱非零字段
+    const shuffledNonZeroFields = selectedNonZeroFields.sort(() => Math.random() - 0.5);
+
+    // 3. 填充非零字段名称和数值
+    for (let i = 0; i < shuffledNonZeroFields.length; i++) {
+      const col = shuffledColumns[i];
+      const field = shuffledNonZeroFields[i];
+
+      // 填充字段名称到第5行
+      const nameCell = this.targetSheet.getCell(5, col);
+      nameCell.value = field.name;
+      nameCell.style = { numFmt: 'General' };
+
+      // 填充数值到第6行
+      const valueCell = this.targetSheet.getCell(6, col);
+      valueCell.value = field.value;
+      valueCell.style = { numFmt: 'General' };
+
+      console.log(`  ${String.fromCharCode(64 + col)}5: ${field.name}, ${String.fromCharCode(64 + col)}6: ${field.value}`);
+    }
+
+    // 4. 填充剩余的空单元格（从所有字段名称中随机选择，排除已选择的）
+    const remainingSlots = shuffledColumns.slice(shuffledNonZeroFields.length);
+    const usedFieldNames = new Set(shuffledNonZeroFields.map(f => f.name));
+    const availableFieldNames = fieldNames.filter(name => !usedFieldNames.has(name));
+
+    // 随机打乱可用字段名称
+    const shuffledAvailableFields = availableFieldNames.sort(() => Math.random() - 0.5);
+
+    for (let i = 0; i < remainingSlots.length; i++) {
+      const col = remainingSlots[i];
+      const fieldName = shuffledAvailableFields[i] || `字段${col}`;
+
+      // 只填充字段名称到第5行，第6行保持空
+      const nameCell = this.targetSheet.getCell(5, col);
+      nameCell.value = fieldName;
+      nameCell.style = { numFmt: 'General' };
+
+      console.log(`  ${String.fromCharCode(64 + col)}5: ${fieldName} (无数值)`);
+    }
   }
 }

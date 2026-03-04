@@ -427,7 +427,29 @@ export class CreditMatcher {
       }
     }
 
-    // 3. 复制第5行（字段名称）到O5-W5
+    // 3. 为所有列添加边框（包括未填充的列）
+    console.log('\\n为所有E-M列和O-W列添加边框:');
+    const rowsWithBorders = [5, ...matchedData.map(m => m.targetRow)];
+    for (const row of rowsWithBorders) {
+      for (const col of [...targetColumns, ...targetColumns.map(c => c + 10)]) {
+        const cell = this.targetSheet.getCell(row, col);
+        // 如果没有设置过样式，则添加边框
+        if (!cell.style || !cell.style.border) {
+          cell.style = {
+            numFmt: 'General',
+            alignment: row === 5 ? { wrapText: true } : undefined,
+            border: {
+              top: { style: 'thin' },
+              left: { style: 'thin' },
+              bottom: { style: 'thin' },
+              right: { style: 'thin' }
+            }
+          };
+        }
+      }
+    }
+
+    // 4. 复制第5行（字段名称）到O5-W5
     console.log('\\n复制第5行到O5-W5:');
     for (let col = 5; col <= 13; col++) {
       const targetCol = col + 10;
@@ -438,7 +460,7 @@ export class CreditMatcher {
       console.log(`  ${String.fromCharCode(64 + targetCol)}5: ${nameCell.value}`);
     }
 
-    // 4. 复制各机构的数值行到O-W区域
+    // 5. 复制各机构的数值行到O-W区域
     for (const orgData of matchedData) {
       const { targetRow, orgName } = orgData;
       console.log(`\\n复制机构 ${orgName} (目标行${targetRow}) 的数值到O-W区域:`);

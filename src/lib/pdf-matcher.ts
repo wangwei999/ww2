@@ -616,23 +616,54 @@ export class PDFMatcher {
           const newCell = newRow.getCell(colNumber);
 
           // 复制值和公式（保留公式，不用结果替换）
-          const cellData = sourceCell as any;
-          
-          // 检查是否有公式（保留公式）
-          if (cellData.formula) {
-            // 有公式，复制公式
-            newCell.value = { formula: cellData.formula };
-          } else if (cellData.sharedFormula) {
-            // 有共享公式，复制共享公式
-            newCell.value = { sharedFormula: cellData.sharedFormula };
-            if (cellData.result !== undefined) {
-              newCell.value = { 
-                sharedFormula: cellData.sharedFormula, 
-                result: cellData.result 
-              };
+          try {
+            const cellData = sourceCell as any;
+            
+            // 检查是否有公式（保留公式）- 使用try-catch保护
+            let hasFormula = false;
+            let hasSharedFormula = false;
+            let formulaValue = null;
+            let sharedFormulaValue = null;
+            let resultValue = null;
+
+            try {
+              if (cellData.formula) {
+                hasFormula = true;
+                formulaValue = cellData.formula;
+              }
+            } catch (e) {
+              // formula属性访问失败，忽略
             }
-          } else {
-            // 无公式，复制值
+
+            try {
+              if (cellData.sharedFormula) {
+                hasSharedFormula = true;
+                sharedFormulaValue = cellData.sharedFormula;
+                resultValue = cellData.result;
+              }
+            } catch (e) {
+              // sharedFormula属性访问失败，忽略
+            }
+
+            if (hasFormula && formulaValue) {
+              // 有公式，复制公式
+              newCell.value = { formula: formulaValue };
+            } else if (hasSharedFormula && sharedFormulaValue) {
+              // 有共享公式，复制共享公式
+              if (resultValue !== undefined && resultValue !== null) {
+                newCell.value = { 
+                  sharedFormula: sharedFormulaValue, 
+                  result: resultValue 
+                };
+              } else {
+                newCell.value = { sharedFormula: sharedFormulaValue };
+              }
+            } else {
+              // 无公式，复制值
+              newCell.value = sourceCell.value;
+            }
+          } catch (e) {
+            // 如果公式处理失败，直接复制值
             newCell.value = sourceCell.value;
           }
 

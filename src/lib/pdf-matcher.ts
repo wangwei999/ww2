@@ -468,17 +468,18 @@ export class PDFMatcher {
         const cell = sheet.getCell(mapping.targetRowIndex, ct.colIndex);
         const oldValue = cell.value;
         
-        // 检查单元格是否包含公式或共享公式
-        const cellData = cell as any;
-        if (cellData.formula || cellData.sharedFormula) {
-          console.log(`  ${ct.type} (列${ct.colIndex}): 检测到公式，清除公式后填充值`);
-          // 清除公式相关属性
-          cellData.formula = undefined;
-          cellData.sharedFormula = undefined;
-          cellData.result = undefined;
+        // 检查单元格是否包含公式或共享公式，如果有则清除
+        try {
+          const cellData = cell as any;
+          if (cellData.formula || cellData.sharedFormula) {
+            console.log(`  ${ct.type} (列${ct.colIndex}): 检测到公式，清除公式后填充值`);
+          }
+          // 直接赋值会自动清除公式
+        } catch (e) {
+          // 忽略错误
         }
         
-        // 填充新金额
+        // 填充新金额（直接赋值会自动覆盖公式）
         cell.value = ct.amount;
         
         // 设置红色字体
@@ -537,15 +538,17 @@ export class PDFMatcher {
             allowedCols && !allowedCols.has(col)) {
           const oldValue = cell.value;
           
-          // 检查单元格是否包含公式或共享公式
-          const cellData = cell as any;
-          if (cellData.formula || cellData.sharedFormula) {
-            // 清除公式相关属性
-            cellData.formula = undefined;
-            cellData.sharedFormula = undefined;
-            cellData.result = undefined;
+          // 检查是否包含公式
+          try {
+            const cellData = cell as any;
+            if (cellData.formula || cellData.sharedFormula) {
+              console.log(`  删除多余数据(含公式): ${mapping.orgName} 列${col}`);
+            }
+          } catch (e) {
+            // 忽略错误
           }
           
+          // 直接赋值null会自动清除公式
           cell.value = null;
           console.log(`  删除多余数据: ${mapping.orgName} 列${col} (${oldValue})`);
         }

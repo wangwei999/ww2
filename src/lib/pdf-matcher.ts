@@ -583,7 +583,7 @@ export class PDFMatcher {
   }
 
   /**
-   * 创建干净的工作簿（只复制值，不复制公式）
+   * 创建干净的工作簿（保留样式和公式）
    */
   private async createCleanWorkbook(): Promise<ExcelJS.Workbook> {
     console.log('\\n=== 创建干净的工作簿 ===');
@@ -601,48 +601,79 @@ export class PDFMatcher {
         }
       });
 
-      // 复制行高和单元格值
-      sourceSheet.eachRow((row, rowNumber) => {
-        const newRow = newSheet.getRow(rowNumber);
-        newRow.height = row.height;
+      // 获取实际使用的行列范围
+      const maxRow = sourceSheet.rowCount || 200;
+      const maxCol = sourceSheet.columnCount || 50;
 
-        row.eachCell((cell, colNumber) => {
+      // 复制所有单元格（包括空单元格，保留边框）
+      for (let rowNumber = 1; rowNumber <= maxRow; rowNumber++) {
+        const sourceRow = sourceSheet.getRow(rowNumber);
+        const newRow = newSheet.getRow(rowNumber);
+        newRow.height = sourceRow.height;
+
+        for (let colNumber = 1; colNumber <= maxCol; colNumber++) {
+          const sourceCell = sourceRow.getCell(colNumber);
           const newCell = newRow.getCell(colNumber);
+
+          // 复制值和公式（保留公式，不用结果替换）
+          const cellData = sourceCell as any;
           
-          // 只复制值，不复制公式
-          const cellData = cell as any;
-          if (cellData.result !== undefined && cellData.result !== null) {
-            // 如果是公式单元格，使用计算结果
-            newCell.value = cellData.result;
+          // 检查是否有公式（保留公式）
+          if (cellData.formula) {
+            // 有公式，复制公式
+            newCell.value = { formula: cellData.formula };
+          } else if (cellData.sharedFormula) {
+            // 有共享公式，复制共享公式
+            newCell.value = { sharedFormula: cellData.sharedFormula };
+            if (cellData.result !== undefined) {
+              newCell.value = { 
+                sharedFormula: cellData.sharedFormula, 
+                result: cellData.result 
+              };
+            }
           } else {
-            newCell.value = cell.value;
+            // 无公式，复制值
+            newCell.value = sourceCell.value;
           }
 
-          // 复制样式
+          // 复制样式（包括边框）
           try {
-            if (cell.style) {
-              newCell.style = JSON.parse(JSON.stringify(cell.style));
+            if (sourceCell.style) {
+              // 使用model来复制样式
+              const styleModel = (sourceCell as any).model;
+              if (styleModel && styleModel.style) {
+                newCell.style = { ...styleModel.style };
+              } else {
+                newCell.style = JSON.parse(JSON.stringify(sourceCell.style));
+              }
             }
-            if (cell.font) {
-              newCell.font = JSON.parse(JSON.stringify(cell.font));
+            if (sourceCell.font) {
+              newCell.font = JSON.parse(JSON.stringify(sourceCell.font));
             }
-            if (cell.fill) {
-              newCell.fill = JSON.parse(JSON.stringify(cell.fill));
+            if (sourceCell.fill) {
+              newCell.fill = JSON.parse(JSON.stringify(sourceCell.fill));
             }
-            if (cell.border) {
-              newCell.border = JSON.parse(JSON.stringify(cell.border));
+            if (sourceCell.border) {
+              newCell.border = JSON.parse(JSON.stringify(sourceCell.border));
+            } else {
+              // 如果原单元格没有边框，但有数据的单元格有边框，则设置默认边框
+              // 检查同行其他单元格是否有边框
+              const firstDataCell = sourceRow.getCell(1);
+              if (firstDataCell && firstDataCell.border) {
+                newCell.border = JSON.parse(JSON.stringify(firstDataCell.border));
+              }
             }
-            if (cell.alignment) {
-              newCell.alignment = JSON.parse(JSON.stringify(cell.alignment));
+            if (sourceCell.alignment) {
+              newCell.alignment = JSON.parse(JSON.stringify(sourceCell.alignment));
             }
-            if (cell.numFmt) {
-              newCell.numFmt = cell.numFmt;
+            if (sourceCell.numFmt) {
+              newCell.numFmt = sourceCell.numFmt;
             }
           } catch (e) {
             // 样式复制失败，忽略
           }
-        });
-      });
+        }
+      }
 
       // 复制合并单元格
       const merges = (sourceSheet as any)._merges;

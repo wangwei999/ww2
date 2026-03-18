@@ -78,7 +78,10 @@ export class PDFMatcher {
     // 5. 删除多余的授信品种数据
     this.removeExtraCreditTypes();
 
-    // 6. 统计结果
+    // 6. 创建新的干净工作簿（避免公式问题）
+    const cleanWorkbook = await this.createCleanWorkbook();
+
+    // 7. 统计结果
     const statistics = {
       totalOrganizations: this.mappings.length,
       matchedCount: this.mappings.filter(m => m.targetRowIndex).length,
@@ -91,7 +94,7 @@ export class PDFMatcher {
     console.log('匹配失败:', statistics.unmatchedCount);
 
     return {
-      workbook: this.targetWorkbook,
+      workbook: cleanWorkbook,
       statistics,
     };
   }
@@ -577,5 +580,86 @@ export class PDFMatcher {
         }
       }
     }
+  }
+
+  /**
+   * 创建干净的工作簿（只复制值，不复制公式）
+   */
+  private async createCleanWorkbook(): Promise<ExcelJS.Workbook> {
+    console.log('\\n=== 创建干净的工作簿 ===');
+
+    const newWorkbook = new ExcelJS.Workbook();
+
+    // 复制所有工作表
+    this.targetWorkbook.eachSheet((sourceSheet, sheetId) => {
+      const newSheet = newWorkbook.addWorksheet(sourceSheet.name);
+
+      // 复制列宽
+      sourceSheet.columns.forEach((col, index) => {
+        if (col.width) {
+          newSheet.getColumn(index + 1).width = col.width;
+        }
+      });
+
+      // 复制行高和单元格值
+      sourceSheet.eachRow((row, rowNumber) => {
+        const newRow = newSheet.getRow(rowNumber);
+        newRow.height = row.height;
+
+        row.eachCell((cell, colNumber) => {
+          const newCell = newRow.getCell(colNumber);
+          
+          // 只复制值，不复制公式
+          const cellData = cell as any;
+          if (cellData.result !== undefined && cellData.result !== null) {
+            // 如果是公式单元格，使用计算结果
+            newCell.value = cellData.result;
+          } else {
+            newCell.value = cell.value;
+          }
+
+          // 复制样式
+          try {
+            if (cell.style) {
+              newCell.style = JSON.parse(JSON.stringify(cell.style));
+            }
+            if (cell.font) {
+              newCell.font = JSON.parse(JSON.stringify(cell.font));
+            }
+            if (cell.fill) {
+              newCell.fill = JSON.parse(JSON.stringify(cell.fill));
+            }
+            if (cell.border) {
+              newCell.border = JSON.parse(JSON.stringify(cell.border));
+            }
+            if (cell.alignment) {
+              newCell.alignment = JSON.parse(JSON.stringify(cell.alignment));
+            }
+            if (cell.numFmt) {
+              newCell.numFmt = cell.numFmt;
+            }
+          } catch (e) {
+            // 样式复制失败，忽略
+          }
+        });
+      });
+
+      // 复制合并单元格
+      const merges = (sourceSheet as any)._merges;
+      if (merges) {
+        Object.values(merges).forEach((merge: any) => {
+          try {
+            newSheet.mergeCells(merge);
+          } catch (e) {
+            // 忽略合并错误
+          }
+        });
+      }
+
+      console.log(`  复制工作表: ${sourceSheet.name}`);
+    });
+
+    console.log('干净工作簿创建完成');
+    return newWorkbook;
   }
 }

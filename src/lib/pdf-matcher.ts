@@ -72,13 +72,16 @@ export class PDFMatcher {
     // 3. 匹配机构和授信品种
     this.matchOrganizationsAndCreditTypes();
 
-    // 4. 填充金额并标记红色
+    // 4. 填充金额
     this.fillAmountsWithRedMark();
 
     // 5. 删除多余的授信品种数据
     this.removeExtraCreditTypes();
 
-    // 6. 统计结果
+    // 6. 清理共享公式
+    this.cleanupSharedFormulas();
+
+    // 7. 统计结果
     const statistics = {
       totalOrganizations: this.mappings.length,
       matchedCount: this.mappings.filter(m => m.targetRowIndex).length,
@@ -537,5 +540,42 @@ export class PDFMatcher {
         }
       }
     }
+  }
+
+  /**
+   * 清理共享公式，避免写入时的错误
+   */
+  private cleanupSharedFormulas(): void {
+    console.log('\\n=== 清理共享公式 ===');
+
+    const sheets = [this.sourceSheet单体, this.sourceSheet集团].filter(s => s);
+
+    for (const sheet of sheets) {
+      if (!sheet) continue;
+
+      sheet.eachRow((row, rowNumber) => {
+        row.eachCell((cell, colNumber) => {
+          try {
+            const cellData = cell as any;
+            // 检查是否有共享公式
+            if (cellData.sharedFormula) {
+              // 获取公式的计算结果
+              const result = cellData.result;
+              // 清除共享公式引用，直接使用计算结果
+              if (result !== undefined && result !== null) {
+                cell.value = result;
+              } else {
+                cell.value = null;
+              }
+              console.log(`  清理共享公式: ${sheet.name} ${String.fromCharCode(64 + colNumber)}${rowNumber}`);
+            }
+          } catch (e) {
+            // 忽略错误
+          }
+        });
+      });
+    }
+
+    console.log('共享公式清理完成');
   }
 }

@@ -1,6 +1,12 @@
 import ExcelJS from 'exceljs';
 import { LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { normalizeOrganizationName } from './data-utils';
+import { fromBase64 } from 'pdf2pic';
+import path from 'path';
+import fs from 'fs';
+
+// 临时目录用于存储PDF转换的图片
+const TEMP_DIR = '/tmp/pdf-images';
 
 /**
  * PDF模式处理器
@@ -130,30 +136,94 @@ export class PDFMatcher {
   private async recognizePDFTable(): Promise<void> {
     console.log('识别PDF表格...');
 
+    // 确保临时目录存在
+    if (!fs.existsSync(TEMP_DIR)) {
+      fs.mkdirSync(TEMP_DIR, { recursive: true });
+    }
+
     // 将PDF转换为Base64
     let pdfBase64: string;
-    let mimeType: string;
 
     if (this.pdfFile instanceof File) {
       const arrayBuffer = await this.pdfFile.arrayBuffer();
       pdfBase64 = Buffer.from(arrayBuffer).toString('base64');
-      mimeType = this.pdfFile.type || 'application/pdf';
     } else {
       pdfBase64 = this.pdfFile.toString('base64');
-      mimeType = 'application/pdf';
     }
 
-    const dataUri = `data:${mimeType};base64,${pdfBase64}`;
+    // 配置pdf2pic选项
+    const options = {
+      density: 200,           // 高密度以获得清晰的图片
+      saveFilename: 'page',
+      savePath: TEMP_DIR,
+      format: 'png',
+      width: 2000,
+      height: 2000,
+    };
 
-    // 使用Vision LLM识别表格
-    const messages = [
-      {
-        role: 'user' as const,
-        content: [
+    // 创建转换器
+    const convert = fromBase64(pdfBase64, options);
+
+    console.log('正在将PDF转换为图片...');
+
+    // 获取PDF总页数并转换所有页面
+    const pages: string[] = [];
+    let pageNum = 1;
+
+    try {
+      // 尝试转换多页PDF
+      while (true) {
+        try {
+          const result = await convert(pageNum, { responseType: 'image' });
+          if (result && result.path) {
+            console.log(`成功转换第 ${pageNum} 页: ${result.path}`);
+            pages.push(result.path);
+            pageNum++;
+          } else {
+            break;
+          }
+        } catch (e) {
+          // 如果转换失败，说明已经到达最后一页
+          if (pageNum === 1) {
+            // 如果第一页就失败，尝试不指定页码
+            const result = await convert(1, { responseType: 'image' });
+            if (result && result.path) {
+              pages.push(result.path);
+            }
+          }
+          break;
+        }
+
+        // 最多处理20页
+        if (pageNum > 20) break;
+      }
+    } catch (error) {
+      console.error('PDF转换错误:', error);
+      throw new Error('PDF文件转换失败，请确保PDF文件格式正确');
+    }
+
+    if (pages.length === 0) {
+      throw new Error('无法从PDF中提取页面');
+    }
+
+    console.log(`共转换 ${pages.length} 页PDF`);
+
+    // 对每一页进行OCR识别
+    for (const imagePath of pages) {
+      try {
+        const imageBuffer = fs.readFileSync(imagePath);
+        const imageBase64 = imageBuffer.toString('base64');
+        const dataUri = `data:image/png;base64,${imageBase64}`;
+
+        // 使用Vision LLM识别表格
+        const messages = [
           {
-            type: 'text' as const,
-            text: `请识别这个PDF文档中的表格内容。
-这是一个扫描版的PDF，内容是一个WORD文档中的表格。
+            role: 'user' as const,
+            content: [
+              {
+                type: 'text' as const,
+                text: `请识别这个图片中的表格内容。
+这是一个扫描版PDF的页面，内容是一个WORD文档中的表格。
 
 请提取表格中的以下信息：
 - 第3列：机构名称
@@ -173,50 +243,63 @@ export class PDFMatcher {
 
 注意：
 1. 如果第5列包含多个授信品种和金额，请全部提取
-2. 金额请提取数字部分，不要包含单位
+2. 金额请提取数字部分，不要包含单位（亿元、万元等）
 3. 如果某个单元格为空或无法识别，请跳过该行
 4. 只返回JSON数据，不要有其他说明文字`,
+              },
+              {
+                type: 'image_url' as const,
+                image_url: {
+                  url: dataUri,
+                  detail: 'high' as const,
+                },
+              },
+            ],
           },
-          {
-            type: 'image_url' as const,
-            image_url: {
-              url: dataUri,
-              detail: 'high' as const,
-            },
-          },
-        ],
-      },
-    ];
+        ];
 
-    const response = await this.llmClient.invoke(messages, {
-      model: 'doubao-seed-1-6-vision-250815',
-      temperature: 0.1,
+        const response = await this.llmClient.invoke(messages, {
+          model: 'doubao-seed-1-6-vision-250815',
+          temperature: 0.1,
+        });
+
+        console.log(`第 ${pages.indexOf(imagePath) + 1} 页识别结果:`, response.content.substring(0, 200) + '...');
+
+        // 解析JSON结果
+        try {
+          let jsonStr = response.content;
+          const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            jsonStr = jsonMatch[0];
+          }
+
+          const result = JSON.parse(jsonStr);
+          if (result.tableData && Array.isArray(result.tableData)) {
+            this.pdfData.push(...result.tableData);
+          }
+        } catch (error) {
+          console.error(`第 ${pages.indexOf(imagePath) + 1} 页JSON解析失败:`, error);
+        }
+      } finally {
+        // 清理临时文件
+        try {
+          fs.unlinkSync(imagePath);
+        } catch (e) {
+          // 忽略清理错误
+        }
+      }
+    }
+
+    console.log(`成功识别 ${this.pdfData.length} 个机构的数据`);
+    this.pdfData.forEach((item, index) => {
+      console.log(`  ${index + 1}. ${item.orgName}: ${item.creditTypes.length}个授信品种`);
+      item.creditTypes.forEach(ct => {
+        console.log(`     - ${ct.type}: ${ct.amount}`);
+      });
     });
 
-    console.log('PDF识别结果:', response.content);
-
-    // 解析JSON结果
-    try {
-      // 尝试提取JSON部分
-      let jsonStr = response.content;
-      const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        jsonStr = jsonMatch[0];
-      }
-
-      const result = JSON.parse(jsonStr);
-      this.pdfData = result.tableData || [];
-
-      console.log(`成功识别 ${this.pdfData.length} 个机构的数据`);
-      this.pdfData.forEach((item, index) => {
-        console.log(`  ${index + 1}. ${item.orgName}: ${item.creditTypes.length}个授信品种`);
-        item.creditTypes.forEach(ct => {
-          console.log(`     - ${ct.type}: ${ct.amount}`);
-        });
-      });
-    } catch (error) {
-      console.error('解析PDF识别结果失败:', error);
-      throw new Error('PDF表格识别结果解析失败，请检查PDF文件格式');
+    if (this.pdfData.length === 0) {
+      throw new Error('PDF表格识别结果为空，请检查PDF文件内容');
     }
   }
 

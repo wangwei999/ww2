@@ -466,30 +466,47 @@ export class PDFMatcher {
         if (!ct.colIndex) continue;
 
         const cell = sheet.getCell(mapping.targetRowIndex, ct.colIndex);
-        const oldValue = cell.value;
         
-        // 检查单元格是否包含公式或共享公式，如果有则清除
+        // 获取原值（处理公式单元格的情况）
+        let oldNumericValue: number | null = null;
         try {
           const cellData = cell as any;
-          if (cellData.formula || cellData.sharedFormula) {
-            console.log(`  ${ct.type} (列${ct.colIndex}): 检测到公式，清除公式后填充值`);
+          // 如果是公式单元格，取result值
+          if (cellData.result !== undefined && cellData.result !== null) {
+            oldNumericValue = Number(cellData.result);
+          } else if (cell.value !== null && cell.value !== undefined) {
+            oldNumericValue = Number(cell.value);
           }
-          // 直接赋值会自动清除公式
         } catch (e) {
-          // 忽略错误
+          oldNumericValue = null;
         }
+
+        const newNumericValue = ct.amount;
         
-        // 填充新金额（直接赋值会自动覆盖公式）
-        cell.value = ct.amount;
-        
-        // 设置红色字体
-        cell.font = {
-          color: { argb: 'FFFF0000' },
-          bold: true,
-        };
+        // 判断是否有变动（只有变动时才标记红色）
+        const hasChange = (
+          // 情况1: 原值为空或无效，新值有值
+          (oldNumericValue === null || isNaN(oldNumericValue)) && !isNaN(newNumericValue) ||
+          // 情况2: 原值和新值不同
+          (oldNumericValue !== null && !isNaN(oldNumericValue) && oldNumericValue !== newNumericValue)
+        );
+
+        // 填充新金额
+        cell.value = newNumericValue;
+
+        // 只有有变动时才设置红色字体
+        if (hasChange) {
+          cell.font = {
+            color: { argb: 'FFFF0000' },
+            bold: true,
+          };
+          console.log(`  ${ct.type} (列${ct.colIndex}): ${oldNumericValue ?? '(空)'} -> ${newNumericValue} [红色标记]`);
+        } else {
+          // 没有变动，保持原字体样式
+          console.log(`  ${ct.type} (列${ct.colIndex}): ${newNumericValue} (无变动)`);
+        }
 
         ct.filled = true;
-        console.log(`  ${ct.type} (列${ct.colIndex}): ${oldValue || '(空)'} -> ${ct.amount} [红色标记]`);
       }
     }
   }

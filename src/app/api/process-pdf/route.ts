@@ -45,9 +45,18 @@ export async function POST(request: NextRequest) {
     const buffer = await result.workbook.xlsx.writeBuffer();
 
     // 生成新文件名：日期+原文件名（如 260319测试.xlsx）
-    const originalName = excelFile.name.replace(/\.(xlsx|xls)$/i, ''); // 去掉扩展名
+    // 如果原文件名已以YYMMDD开头，则替换为当前日期
+    let originalName = excelFile.name.replace(/\.(xlsx|xls)$/i, ''); // 去掉扩展名
     const now = new Date();
     const datePrefix = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    
+    // 检查是否以6位数字（YYMMDD）开头
+    const dateMatch = originalName.match(/^(\d{6})(.*)$/);
+    if (dateMatch) {
+      // 已有日期前缀，替换为当前日期
+      originalName = dateMatch[2]; // 去掉旧的日期前缀
+    }
+    
     const newFileName = `${datePrefix}${originalName}.xlsx`;
 
     // 返回文件

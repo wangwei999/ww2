@@ -523,8 +523,19 @@ export async function POST(request: NextRequest) {
     
     // 保存结果（统一保存为 XLSX 格式，便于后续编辑和查看）
     // 注意：无论输入文件是 XLSX 还是 DOCX，输出统一为 XLSX 格式
-    const originalFilename = fileB.name.replace(/\.[^/.]+$/, ""); // 移除扩展名
-    const fileId = `${Date.now()}_${originalFilename}.xlsx`;
+    let originalFilename = fileB.name.replace(/\.[^/.]+$/, ""); // 移除扩展名
+    
+    // 生成日期前缀（YYMMDD格式）
+    const now = new Date();
+    const datePrefix = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    
+    // 检查是否以6位数字（YYMMDD）开头，如果是则替换为当前日期
+    const dateMatch = originalFilename.match(/^(\d{6})(.*)$/);
+    if (dateMatch) {
+      originalFilename = dateMatch[2]; // 去掉旧的日期前缀
+    }
+    
+    const fileId = `${Date.now()}_${datePrefix}${originalFilename}.xlsx`;
     console.log('生成的文件ID:', fileId);
     console.log('注意：输出格式统一为 XLSX，便于查看和编辑');
     

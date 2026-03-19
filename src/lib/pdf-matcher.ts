@@ -82,8 +82,9 @@ export class PDFMatcher {
     // 6. 计算汇总值（单体表D列、集团表E列）
     this.calculateSummaryValues();
 
-    // 7. 清理所有公式，避免共享公式验证错误
-    this.clearAllFormulas();
+    // 7. 清理授信品种列和E列共享公式，但保留C列公式
+    // 注意：集团表C列有公式（如C4=E4+E5），必须保留
+    this.cleanupFormulasSelective();
 
     // 8. 统计结果
     const statistics = {
@@ -668,69 +669,143 @@ export class PDFMatcher {
   /**
    * 计算汇总值
    * 单体表：D列（第4列）= 授信品种列（E列开始）的金额总和
-   * 集团表：E列（第5列）= 授信品种列（F列开始）的金额总和
+   * 集团表：
+   *   - E列（第5列）= 授信品种列（F列开始）的金额总和
+   *   - C列合并单元格 = 对应的E列单元格求和
    */
   private calculateSummaryValues(): void {
     console.log('\\n=== 计算汇总值 ===');
 
     // 处理单体表
     if (this.sourceSheet单体) {
-      this.calculateSheetSummary(this.sourceSheet单体, '单体', 4); // D列
+      this.calculateDanTiSummary(this.sourceSheet单体);
     }
 
     // 处理集团表
     if (this.sourceSheet集团) {
-      this.calculateSheetSummary(this.sourceSheet集团, '集团', 5); // E列
+      this.calculateJiTuanSummary(this.sourceSheet集团);
     }
   }
 
   /**
-   * 计算单个工作表的汇总值
+   * 计算单体表汇总值
+   * D列 = E列开始的授信品种金额之和
    */
-  private calculateSheetSummary(sheet: ExcelJS.Worksheet, sheetName: string, summaryCol: number): void {
-    console.log(`\\n计算${sheetName}表汇总值 (第${summaryCol}列):`);
+  private calculateDanTiSummary(sheet: ExcelJS.Worksheet): void {
+    console.log('\\n计算单体表汇总值 (D列):');
     let calculatedCount = 0;
 
-    // 遍历所有匹配到的机构行
     for (const mapping of this.mappings) {
-      if (!mapping.targetRowIndex || mapping.sourceSheet !== sheetName) continue;
+      if (!mapping.targetRowIndex || mapping.sourceSheet !== '单体') continue;
 
       const row = mapping.targetRowIndex;
       let sum = 0;
       let hasData = false;
 
-      // 从汇总列之后开始累加授信品种金额
-      // 单体表：从E列（第5列）开始
-      // 集团表：从F列（第6列）开始
-      for (let col = summaryCol + 1; col <= 50; col++) {
+      // 从E列（第5列）开始累加授信品种金额
+      for (let col = 5; col <= 50; col++) {
         const cell = sheet.getCell(row, col);
         const value = cell.value;
-        
-        if (typeof value === 'number') {
+        if (typeof value === 'number' && value !== 0) {
           sum += value;
           hasData = true;
         }
       }
 
-      // 只有当有数据时才写入汇总值
       if (hasData) {
-        const summaryCell = sheet.getCell(row, summaryCol);
-        const oldValue = summaryCell.value;
+        const summaryCell = sheet.getCell(row, 4); // D列
         summaryCell.value = sum;
         calculatedCount++;
-        console.log(`  行${row}: ${oldValue ?? '(空)'} -> ${sum}`);
+        console.log(`  行${row}: D列 = ${sum}`);
       }
     }
 
-    console.log(`${sheetName}表汇总计算完成，共计算 ${calculatedCount} 行`);
+    console.log(`单体表汇总计算完成，共 ${calculatedCount} 行`);
   }
 
   /**
-   * 清理所有公式，避免共享公式验证错误
-   * 这是最安全的做法，将所有公式转换为值
+   * 计算集团表汇总值
+   * E列 = F列开始的授信品种金额之和
+   * C列合并单元格 = 对应的E列单元格求和
    */
-  private clearAllFormulas(): void {
-    console.log('\\n=== 清理所有公式 ===');
+  private calculateJiTuanSummary(sheet: ExcelJS.Worksheet): void {
+    console.log('\\n计算集团表汇总值:');
+
+    // 第一步：计算每行E列的值（F列开始的授信品种之和）
+    console.log('\\n1. 计算E列值:');
+    const eColumnValues = new Map<number, number>(); // 行号 -> E列值
+
+    for (const mapping of this.mappings) {
+      if (!mapping.targetRowIndex || mapping.sourceSheet !== '集团') continue;
+
+      const row = mapping.targetRowIndex;
+      let sum = 0;
+      let hasData = false;
+
+      // 从F列（第6列）开始累加授信品种金额
+      for (let col = 6; col <= 50; col++) {
+        const cell = sheet.getCell(row, col);
+        const value = cell.value;
+        if (typeof value === 'number' && value !== 0) {
+          sum += value;
+          hasData = true;
+        }
+      }
+
+      if (hasData) {
+        eColumnValues.set(row, sum);
+        const eCell = sheet.getCell(row, 5); // E列
+        eCell.value = sum;
+        console.log(`  行${row}: E列 = ${sum}`);
+      }
+    }
+
+    // 第二步：计算C列合并单元格的值（对应E列求和）
+    console.log('\\n2. 计算C列合并单元格值:');
+    
+    // 获取合并单元格信息
+    const model = sheet.model;
+    if (model && model.merges) {
+      for (const merge of model.merges) {
+        // 解析合并范围，格式如 "C4:C5"
+        if (typeof merge === 'string' && merge.startsWith('C')) {
+          const parts = merge.split(':');
+          if (parts.length === 2) {
+            const startMatch = parts[0].match(/C(\d+)/);
+            const endMatch = parts[1].match(/C(\d+)/);
+            
+            if (startMatch && endMatch) {
+              const startRow = parseInt(startMatch[1]);
+              const endRow = parseInt(endMatch[1]);
+              
+              // 计算这个合并单元格对应的E列求和
+              let cSum = 0;
+              for (let r = startRow; r <= endRow; r++) {
+                const eValue = eColumnValues.get(r);
+                if (eValue !== undefined) {
+                  cSum += eValue;
+                }
+              }
+              
+              // 写入C列值
+              const cCell = sheet.getCell(startRow, 3); // C列，用master行
+              cCell.value = cSum;
+              console.log(`  C${startRow}:C${endRow} = ${cSum} (E${startRow}:E${endRow}求和)`);
+            }
+          }
+        }
+      }
+    }
+
+    console.log('集团表汇总计算完成');
+  }
+
+  /**
+   * 选择性清理公式
+   * 只清理授信品种列和E列的共享公式，保留C列公式
+   */
+  private cleanupFormulasSelective(): void {
+    console.log('\\n=== 选择性清理公式 ===');
 
     this.targetWorkbook.eachSheet((worksheet, sheetId) => {
       const sheetName = worksheet.name.trim();
@@ -743,6 +818,9 @@ export class PDFMatcher {
 
       worksheet.eachRow((row, rowNumber) => {
         for (let col = 1; col <= 50; col++) {
+          // 集团表：跳过C列（第3列），保留C列公式
+          if (isJiTuan && col === 3) continue;
+          
           const cell = row.getCell(col);
           try {
             const model = (cell as any).model;
@@ -750,7 +828,7 @@ export class PDFMatcher {
 
             // 检查是否有公式
             if (model.formula !== undefined || model.sharedFormula !== undefined) {
-              // 获取当前值（可能是公式结果或我们刚计算的汇总值）
+              // 获取当前值
               let value = null;
               try {
                 if (typeof cell.value === 'number') {
@@ -780,10 +858,10 @@ export class PDFMatcher {
       });
 
       if (clearedCount > 0) {
-        console.log(`  工作表 "${worksheet.name}" 清理了 ${clearedCount} 个公式`);
+        console.log(`  工作表 "${worksheet.name}" 清理了 ${clearedCount} 个公式（保留C列公式）`);
       }
     });
 
-    console.log('公式清理完成');
+    console.log('选择性公式清理完成');
   }
 }

@@ -79,8 +79,9 @@ export class PDFMatcher {
     // 5. 删除多余的授信品种数据
     this.removeExtraCreditTypes();
 
-    // 6. 直接返回原始工作簿（保留所有公式）
-    // 注意：汇总公式会被保留，填充数据后Excel会自动重新计算
+    // 6. 修复共享公式引用，确保writeBuffer不会报错
+    // 策略：检查所有共享公式，如果主公式丢失，将克隆转换为值
+    this.fixSharedFormulaReferences();
 
     // 7. 统计结果
     const statistics = {
@@ -133,8 +134,116 @@ export class PDFMatcher {
       throw new Error('Excel文件中未找到"单体"或"集团"工作表');
     }
     
-    // 不转换公式，保留汇总公式让Excel自动计算
-    console.log('保留所有公式（包括汇总公式）');
+    // 不再在这里清理公式，改为在最后统一修复共享公式引用
+  }
+
+  /**
+   * 清理授信品种列的共享公式，保留汇总列的公式
+   * 策略：只清理汇总列之后的授信品种列的公式，保留汇总列本身的公式
+   */
+  private cleanupCreditTypeFormulas(): void {
+    console.log('\\n=== 清理授信品种列的共享公式 ===');
+
+    this.targetWorkbook.eachSheet((worksheet, sheetId) => {
+      const sheetName = worksheet.name.trim();
+      const isDanTi = sheetName === '单体' || sheetName === '单体表';
+      const isJiTuan = sheetName === '集团' || sheetName === '集团 ' || sheetName === '集团表';
+      
+      if (!isDanTi && !isJiTuan) return;
+
+      // 确定汇总列位置
+      // 单体表：D列（第4列）
+      // 集团表：E列（第5列）
+      const summaryCol = isDanTi ? 4 : 5;
+      
+      let cleanedCount = 0;
+      let sharedFormulaRefCount = 0;
+
+      // 先扫描整行，找出所有共享公式的引用关系
+      const sharedFormulaMasters = new Map<string, number>(); // 共享公式ID -> 行号
+      const sharedFormulaClones: Array<{ row: number; col: number; refId: string }> = [];
+      
+      worksheet.eachRow((row, rowNumber) => {
+        for (let col = 1; col <= 50; col++) {
+          const cell = row.getCell(col);
+          try {
+            const model = (cell as any).model;
+            if (!model) continue;
+
+            // 记录共享公式的主公式和克隆
+            if (model.sharedFormula !== undefined) {
+              if (typeof model.sharedFormula === 'string') {
+                // 这是一个克隆，记录引用的ID
+                sharedFormulaClones.push({ row: rowNumber, col, refId: model.sharedFormula });
+              } else if (typeof model.sharedFormula === 'number') {
+                // 这是一个主公式（ref = 数字）
+                // 这里我们不知道ID，但可以记录位置
+              }
+              sharedFormulaRefCount++;
+            }
+            
+            // 记录主公式
+            if (model.formula !== undefined && model.sharedFormula === undefined) {
+              // 这是一个主公式（有formula但没有sharedFormula）
+            }
+          } catch (e) {
+            // 忽略错误
+          }
+        }
+      });
+
+      console.log(`  工作表 "${worksheet.name}": 发现 ${sharedFormulaRefCount} 个共享公式引用`);
+
+      // 清理授信品种列的公式（汇总列之后）
+      worksheet.eachRow((row, rowNumber) => {
+        // 从汇总列之后开始清理授信品种列
+        for (let col = summaryCol + 1; col <= 50; col++) {
+          const cell = row.getCell(col);
+          try {
+            const model = (cell as any).model;
+            if (!model) continue;
+
+            // 检查是否有公式
+            if (model.sharedFormula !== undefined || model.formula !== undefined) {
+              // 获取公式结果值
+              let result = null;
+              try {
+                result = (cell as any).result;
+              } catch (e) {
+                try {
+                  result = model.result;
+                } catch (e2) {
+                  result = null;
+                }
+              }
+
+              // 转换为值
+              const value = result !== undefined && result !== null ? result : null;
+              
+              // 同时清理 model 和 cell.value
+              model.value = value;
+              delete model.formula;
+              delete model.sharedFormula;
+              if (model.result !== undefined) delete model.result;
+              
+              // 重新设置cell的值
+              cell.value = value;
+              
+              cleanedCount++;
+              console.log(`    清理: 行${rowNumber} 列${col} 公式已转为值: ${value}`);
+            }
+          } catch (e) {
+            console.warn(`    清理失败: 行${rowNumber} 列${col}`, (e as Error).message);
+          }
+        }
+      });
+
+      if (cleanedCount > 0) {
+        console.log(`  工作表 "${worksheet.name}" 清理了 ${cleanedCount} 个授信品种列公式`);
+      }
+    });
+
+    console.log('授信品种列公式清理完成');
   }
 
   /**
@@ -551,6 +660,124 @@ export class PDFMatcher {
           console.log(`  删除多余数据: ${mapping.orgName} 列${col} (${oldValue})`);
         }
       }
+    }
+  }
+
+  /**
+   * 修复共享公式引用
+   * 策略：检查所有共享公式的克隆，如果主公式丢失或被修改，将克隆转换为值
+   * 这样可以避免writeBuffer时的共享公式验证错误，同时尽可能保留汇总公式
+   */
+  private fixSharedFormulaReferences(): void {
+    console.log('\\n=== 修复共享公式引用 ===');
+
+    this.targetWorkbook.eachSheet((worksheet, sheetId) => {
+      const sheetName = worksheet.name.trim();
+      const isDanTi = sheetName === '单体' || sheetName === '单体表';
+      const isJiTuan = sheetName === '集团' || sheetName === '集团 ' || sheetName === '集团表';
+      
+      if (!isDanTi && !isJiTuan) return;
+
+      // 第一遍：扫描所有单元格，建立共享公式映射
+      // ExcelJS的共享公式：主公式的sharedFormula是一个数字（引用ID）
+      // 克隆单元格的sharedFormula是一个字符串（引用ID）
+      const masterFormulas = new Map<number, { row: number; col: number; cell: any }>(); // ID -> 主公式位置
+      const cloneFormulas: Array<{ row: number; col: number; cell: any; refId: string }> = [];
+
+      worksheet.eachRow((row, rowNumber) => {
+        for (let col = 1; col <= 50; col++) {
+          const cell = row.getCell(col);
+          try {
+            const model = (cell as any).model;
+            if (!model) continue;
+
+            // 检查共享公式
+            if (model.sharedFormula !== undefined) {
+              if (typeof model.sharedFormula === 'number') {
+                // 主公式
+                masterFormulas.set(model.sharedFormula, { row: rowNumber, col, cell });
+              } else if (typeof model.sharedFormula === 'string') {
+                // 克隆
+                cloneFormulas.push({ row: rowNumber, col, cell, refId: model.sharedFormula });
+              }
+            }
+          } catch (e) {
+            // 忽略
+          }
+        }
+      });
+
+      console.log(`  工作表 "${worksheet.name}": 发现 ${masterFormulas.size} 个主公式, ${cloneFormulas.length} 个克隆`);
+
+      // 第二遍：检查每个克隆，如果主公式不在其上方或左侧，转换为值
+      let convertedCount = 0;
+      for (const clone of cloneFormulas) {
+        const refId = parseInt(clone.refId);
+        const master = masterFormulas.get(refId);
+
+        if (!master) {
+          // 主公式不存在，将克隆转换为值
+          this.convertFormulaToValue(clone.cell, clone.row, clone.col);
+          convertedCount++;
+          continue;
+        }
+
+        // 检查主公式是否在克隆的上方或左侧
+        const isAbove = master.row < clone.row;
+        const isLeft = master.col < clone.col;
+
+        if (!isAbove && !isLeft) {
+          // 主公式不在正确位置，将克隆转换为值
+          this.convertFormulaToValue(clone.cell, clone.row, clone.col);
+          convertedCount++;
+        }
+      }
+
+      if (convertedCount > 0) {
+        console.log(`  工作表 "${worksheet.name}" 转换了 ${convertedCount} 个无效克隆公式为值`);
+      }
+    });
+
+    console.log('共享公式引用修复完成');
+  }
+
+  /**
+   * 将单元格的公式转换为计算结果值
+   */
+  private convertFormulaToValue(cell: any, row: number, col: number): void {
+    try {
+      const model = cell.model;
+      if (!model) return;
+
+      // 获取公式计算结果值
+      let result = null;
+      try {
+        if (cell.result !== undefined && cell.result !== null) {
+          result = cell.result;
+        } else if (model.result !== undefined && model.result !== null) {
+          result = model.result;
+        } else if (typeof cell.value === 'number') {
+          result = cell.value;
+        }
+      } catch (e) {
+        // 忽略
+      }
+
+      // 转换为值
+      const value = result !== null ? result : null;
+      
+      // 清理公式相关的属性
+      model.value = value;
+      delete model.formula;
+      delete model.sharedFormula;
+      if (model.result !== undefined) delete model.result;
+      
+      // 重新设置cell的值
+      cell.value = value;
+      
+      console.log(`    转换: 行${row} 列${col} 公式已转为值: ${value}`);
+    } catch (e) {
+      console.warn(`    转换失败: 行${row} 列${col}`, (e as Error).message);
     }
   }
 }

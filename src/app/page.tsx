@@ -346,7 +346,7 @@ export default function Home() {
           <div className="flex justify-center">
             <FileSpreadsheet className="h-12 w-12 text-primary" />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight">智能表格数据填充工具</h1>
+          <h1 className="text-3xl font-bold tracking-tight">授信数据填充</h1>
           <p className="text-muted-foreground">
             上传数据源文件和缺失文件，自动识别表格、匹配字段并填充数据
           </p>

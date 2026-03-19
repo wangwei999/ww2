@@ -132,6 +132,62 @@ export class PDFMatcher {
     if (!this.sourceSheet单体 && !this.sourceSheet集团) {
       throw new Error('Excel文件中未找到"单体"或"集团"工作表');
     }
+
+    // 关键：加载后立即将所有共享公式转换为值，避免后续操作触发共享公式错误
+    this.convertSharedFormulasToValues();
+  }
+
+  /**
+   * 将所有共享公式转换为值（关键修复）
+   * 这是解决"Shared Formula master must exist above and or left of clone"错误的根本方法
+   */
+  private convertSharedFormulasToValues(): void {
+    console.log('\\n=== 将所有共享公式转换为值 ===');
+
+    this.targetWorkbook.eachSheet((worksheet, sheetId) => {
+      let convertedCount = 0;
+      
+      worksheet.eachRow((row, rowNumber) => {
+        row.eachCell((cell, colNumber) => {
+          try {
+            const cellData = cell as any;
+            
+            // 检查是否有共享公式
+            if (cellData.sharedFormula) {
+              // 获取共享公式的结果值
+              const result = cellData.result;
+              
+              // 直接设置值，覆盖共享公式
+              if (result !== undefined && result !== null) {
+                cell.value = result;
+              } else {
+                cell.value = null;
+              }
+              
+              convertedCount++;
+            }
+            // 也检查普通公式
+            else if (cellData.formula) {
+              const result = cellData.result;
+              if (result !== undefined && result !== null) {
+                cell.value = result;
+              } else {
+                cell.value = null;
+              }
+              convertedCount++;
+            }
+          } catch (e) {
+            // 忽略错误，继续处理下一个单元格
+          }
+        });
+      });
+      
+      if (convertedCount > 0) {
+        console.log(`  工作表 "${worksheet.name}" 转换了 ${convertedCount} 个公式`);
+      }
+    });
+
+    console.log('公式转换完成');
   }
 
   /**
@@ -506,7 +562,7 @@ export class PDFMatcher {
   }
 
   /**
-   * 创建干净的工作簿（只保留值和样式，不复制任何公式）
+   * 创建干净的工作簿（所有公式已转换为值，只复制值和样式）
    */
   private async createCleanWorkbook(): Promise<ExcelJS.Workbook> {
     console.log('\\n=== 创建干净的工作簿 ===');
@@ -536,31 +592,8 @@ export class PDFMatcher {
           const sourceCell = sourceRow.getCell(colNumber);
           const newCell = newRow.getCell(colNumber);
 
-          // 只复制值，不复制公式
-          try {
-            const cellData = sourceCell as any;
-            let cellValue = sourceCell.value;
-            
-            // 如果单元格包含公式（普通公式或共享公式），使用结果值
-            if (cellData.formula || cellData.sharedFormula) {
-              try {
-                const result = cellData.result;
-                if (result !== undefined && result !== null) {
-                  cellValue = result;
-                } else {
-                  cellValue = null;
-                }
-              } catch (e) {
-                // 如果获取结果失败，尝试获取value
-                cellValue = sourceCell.value;
-              }
-            }
-            
-            newCell.value = cellValue;
-          } catch (e) {
-            // 出错时直接使用原始值
-            newCell.value = sourceCell.value;
-          }
+          // 直接复制值（所有公式已经在convertSharedFormulasToValues中转换为值）
+          newCell.value = sourceCell.value;
 
           // 复制样式
           try {

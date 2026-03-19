@@ -230,11 +230,28 @@ export class PDFMatcher {
     console.log('正在将PDF转换为图片...');
 
     try {
+      // 检查pdftoppm是否可用
+      try {
+        execSync('which pdftoppm', { timeout: 5000 });
+      } catch (e) {
+        throw new Error('系统工具pdftoppm未安装，请联系管理员安装poppler-utils');
+      }
+
       // 使用 pdftoppm 将 PDF 转换为 PNG 图片
       const outputPrefix = `${sessionDir}/page`;
-      execSync(`pdftoppm -png -r 200 "${pdfPath}" "${outputPrefix}"`, {
-        timeout: 60000, // 60秒超时
-      });
+      console.log(`执行命令: pdftoppm -png -r 200 "${pdfPath}" "${outputPrefix}"`);
+      
+      try {
+        const result = execSync(`pdftoppm -png -r 200 "${pdfPath}" "${outputPrefix}"`, {
+          timeout: 60000, // 60秒超时
+          encoding: 'utf-8',
+        });
+        console.log('pdftoppm命令执行成功');
+      } catch (cmdError: any) {
+        console.error('pdftoppm命令执行失败:', cmdError.message);
+        console.error('错误详情:', cmdError.stderr || cmdError.stdout);
+        throw new Error(`PDF转换失败: ${cmdError.message}`);
+      }
 
       // 获取生成的图片文件列表
       const imageFiles = fs.readdirSync(sessionDir)
@@ -245,7 +262,7 @@ export class PDFMatcher {
       console.log(`共转换 ${imageFiles.length} 页PDF`);
 
       if (imageFiles.length === 0) {
-        throw new Error('无法从PDF中提取页面');
+        throw new Error('无法从PDF中提取页面，可能是空PDF或格式不支持');
       }
 
       // 对每一页进行OCR识别
@@ -336,15 +353,32 @@ export class PDFMatcher {
         console.warn('清理临时文件失败:', e);
       }
 
-    } catch (error) {
+    } catch (error: any) {
       // 清理临时文件
       try {
         rmSync(sessionDir, { recursive: true, force: true });
       } catch (e) {
         // 忽略清理错误
       }
+      
       console.error('PDF转换错误:', error);
-      throw new Error('PDF文件转换失败，请确保PDF文件格式正确');
+      
+      // 提供更详细的错误信息
+      let errorMessage = 'PDF文件转换失败';
+      
+      if (error.message.includes('pdftoppm未安装')) {
+        errorMessage = '系统工具pdftoppm未安装，请联系管理员安装poppler-utils';
+      } else if (error.message.includes('PDF转换失败')) {
+        errorMessage = error.message;
+      } else if (error.message.includes('timeout')) {
+        errorMessage = 'PDF转换超时，文件可能过大或损坏';
+      } else if (error.message.includes('无法从PDF中提取')) {
+        errorMessage = error.message;
+      } else {
+        errorMessage = `PDF文件转换失败: ${error.message}`;
+      }
+      
+      throw new Error(errorMessage);
     }
 
     if (this.pdfData.length === 0) {

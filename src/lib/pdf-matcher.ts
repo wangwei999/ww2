@@ -64,7 +64,7 @@ export class PDFMatcher {
   async process(): Promise<{ workbook: ExcelJS.Workbook; statistics: any }> {
     console.log('=== 开始PDF模式处理 ===');
 
-    // 1. 加载Excel文件（会自动清理共享公式）
+    // 1. 加载Excel文件（不转换公式，保留汇总公式）
     await this.loadExcelFile();
 
     // 2. 识别PDF表格
@@ -79,8 +79,8 @@ export class PDFMatcher {
     // 5. 删除多余的授信品种数据
     this.removeExtraCreditTypes();
 
-    // 6. 创建新的干净工作簿（避免公式问题）
-    const cleanWorkbook = await this.createCleanWorkbook();
+    // 6. 直接返回原始工作簿（保留所有公式）
+    // 注意：汇总公式会被保留，填充数据后Excel会自动重新计算
 
     // 7. 统计结果
     const statistics = {
@@ -95,7 +95,7 @@ export class PDFMatcher {
     console.log('匹配失败:', statistics.unmatchedCount);
 
     return {
-      workbook: cleanWorkbook,
+      workbook: this.targetWorkbook,
       statistics,
     };
   }
@@ -132,73 +132,9 @@ export class PDFMatcher {
     if (!this.sourceSheet单体 && !this.sourceSheet集团) {
       throw new Error('Excel文件中未找到"单体"或"集团"工作表');
     }
-
-    // 关键：加载后立即将所有共享公式转换为值，避免后续操作触发共享公式错误
-    this.convertSharedFormulasToValues();
-  }
-
-  /**
-   * 将所有共享公式转换为值（关键修复）
-   * 这是解决"Shared Formula master must exist above and or left of clone"错误的根本方法
-   */
-  private convertSharedFormulasToValues(): void {
-    console.log('\\n=== 将所有共享公式转换为值 ===');
-
-    this.targetWorkbook.eachSheet((worksheet, sheetId) => {
-      let convertedCount = 0;
-      
-      worksheet.eachRow((row, rowNumber) => {
-        row.eachCell((cell, colNumber) => {
-          try {
-            const cellData = cell as any;
-            const model = cellData.model;
-            
-            if (!model) return;
-            
-            // 检查model中是否有公式相关信息
-            const hasSharedFormula = model.sharedFormula !== undefined;
-            const hasFormula = model.formula !== undefined;
-            
-            // 获取结果值
-            let result = null;
-            try {
-              result = cellData.result;
-            } catch (e) {
-              // 如果获取result失败，尝试从model获取
-              try {
-                result = model.result;
-              } catch (e2) {
-                result = null;
-              }
-            }
-            
-            const value = result !== undefined && result !== null ? result : null;
-            
-            if (hasSharedFormula || hasFormula) {
-              // 清除公式的内部引用
-              model.value = value;
-              delete model.formula;
-              delete model.sharedFormula;
-              delete model.result;
-              
-              // 覆盖cell的value
-              cell.value = value;
-              
-              convertedCount++;
-            }
-          } catch (e) {
-            // 忽略错误，继续处理下一个单元格
-            // console.error(`转换单元格(${rowNumber}, ${colNumber})时出错:`, e);
-          }
-        });
-      });
-      
-      if (convertedCount > 0) {
-        console.log(`  工作表 "${worksheet.name}" 转换了 ${convertedCount} 个公式`);
-      }
-    });
-
-    console.log('公式转换完成');
+    
+    // 不转换公式，保留汇总公式让Excel自动计算
+    console.log('保留所有公式（包括汇总公式）');
   }
 
   /**
@@ -616,133 +552,5 @@ export class PDFMatcher {
         }
       }
     }
-  }
-
-  /**
-   * 创建干净的工作簿（完全重新构建，避免任何公式引用）
-   */
-  private async createCleanWorkbook(): Promise<ExcelJS.Workbook> {
-    console.log('\\n=== 创建干净的工作簿 ===');
-
-    const newWorkbook = new ExcelJS.Workbook();
-
-    this.targetWorkbook.eachSheet((sourceSheet, sheetId) => {
-      const newSheet = newWorkbook.addWorksheet(sourceSheet.name);
-
-      // 复制列宽
-      sourceSheet.columns.forEach((col, index) => {
-        if (col.width) {
-          newSheet.getColumn(index + 1).width = col.width;
-        }
-      });
-
-      const maxRow = sourceSheet.rowCount || 200;
-      const maxCol = sourceSheet.columnCount || 50;
-
-      // 按行按列复制数据
-      for (let rowNumber = 1; rowNumber <= maxRow; rowNumber++) {
-        const sourceRow = sourceSheet.getRow(rowNumber);
-        const newRow = newSheet.getRow(rowNumber);
-        newRow.height = sourceRow.height;
-
-        for (let colNumber = 1; colNumber <= maxCol; colNumber++) {
-          const sourceCell = sourceRow.getCell(colNumber);
-          const newCell = newRow.getCell(colNumber);
-
-          // 获取单元格的值（优先使用结果值）
-          let cellValue: any = null;
-          try {
-            const cellData = sourceCell as any;
-            const model = cellData.model;
-            
-            // 优先级：
-            // 1. 如果有result属性，使用result
-            // 2. 如果value是对象且包含result，使用value.result
-            // 3. 否则使用value
-            
-            if (model && model.result !== undefined && model.result !== null) {
-              // 公式单元格的结果值
-              cellValue = model.result;
-            } else if (model && model.value !== undefined) {
-              const value = model.value;
-              // 如果value是对象，可能包含公式和结果
-              if (value && typeof value === 'object') {
-                if (value.result !== undefined && value.result !== null) {
-                  cellValue = value.result;
-                } else {
-                  cellValue = value;
-                }
-              } else {
-                cellValue = value;
-              }
-            } else if (cellData.sharedFormula || cellData.formula) {
-              // 公式单元格，尝试获取结果
-              const result = cellData.result;
-              cellValue = result !== undefined && result !== null ? result : null;
-            } else {
-              // 否则直接使用value
-              cellValue = sourceCell.value;
-            }
-          } catch (e) {
-            // 最后的fallback
-            try {
-              cellValue = sourceCell.value;
-            } catch (e2) {
-              cellValue = null;
-            }
-          }
-
-          // 设置值
-          newCell.value = cellValue;
-
-          // 复制样式
-          try {
-            if (sourceCell.font) {
-              newCell.font = JSON.parse(JSON.stringify(sourceCell.font));
-            }
-            if (sourceCell.fill) {
-              newCell.fill = JSON.parse(JSON.stringify(sourceCell.fill));
-            }
-            if (sourceCell.border) {
-              newCell.border = JSON.parse(JSON.stringify(sourceCell.border));
-            } else {
-              const firstDataCell = sourceRow.getCell(1);
-              if (firstDataCell && firstDataCell.border) {
-                newCell.border = JSON.parse(JSON.stringify(firstDataCell.border));
-              }
-            }
-            if (sourceCell.alignment) {
-              newCell.alignment = JSON.parse(JSON.stringify(sourceCell.alignment));
-            }
-            if (sourceCell.numFmt) {
-              newCell.numFmt = sourceCell.numFmt;
-            }
-          } catch (e) {
-            // 忽略样式复制错误
-          }
-        }
-      }
-
-      // 复制合并单元格
-      try {
-        const merges = (sourceSheet as any)._merges;
-        if (merges) {
-          Object.values(merges).forEach((merge: any) => {
-            try {
-              newSheet.mergeCells(merge);
-            } catch (e) {
-              // 忽略合并错误
-            }
-          });
-        }
-      } catch (e) {
-        // 忽略合并单元格复制错误
-      }
-
-      console.log(`  复制工作表: ${sourceSheet.name}`);
-    });
-
-    console.log('干净工作簿创建完成');
-    return newWorkbook;
   }
 }

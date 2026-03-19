@@ -1,16 +1,20 @@
 import ExcelJS from 'exceljs';
 import { LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { normalizeOrganizationName } from './data-utils';
+import { execSync } from 'child_process';
+import fs, { mkdirSync, rmSync, existsSync } from 'fs';
+import path from 'path';
+
+// 临时目录用于存储PDF转换的图片
+const TEMP_DIR = '/tmp/pdf-images';
 
 /**
- * 图片模式处理器
- * 用于识别图片中的表格数据并填充到Excel文件中
- * 
- * 注意：由于沙箱环境不支持 canvas 原生模块，无法将 PDF 转换为图片。
- * 用户需要将扫描版 PDF 先转换为图片（如截图），然后上传图片进行处理。
+ * PDF模式处理器
+ * 用于识别PDF中的表格数据并填充到Excel文件中
+ * 使用 pdftoppm (poppler-utils) 将 PDF 转换为图片
  */
-export class ImageMatcher {
-  private imageFiles: File[] | Buffer[];
+export class PDFMatcher {
+  private pdfFile: File | Buffer;
   private excelFile: File | Buffer;
   private targetWorkbook: ExcelJS.Workbook;
   private sourceSheet单体: ExcelJS.Worksheet | null = null;
@@ -18,8 +22,8 @@ export class ImageMatcher {
   private llmClient: LLMClient;
   private customHeaders: Record<string, string>;
 
-  // 图片识别结果
-  private imageData: Array<{
+  // PDF识别结果
+  private pdfData: Array<{
     orgName: string;
     creditTypes: Array<{
       type: string;
@@ -42,11 +46,11 @@ export class ImageMatcher {
   }> = [];
 
   constructor(
-    imageFiles: File[] | Buffer[],
+    pdfFile: File | Buffer,
     excelFile: File | Buffer,
     customHeaders: Record<string, string> = {}
   ) {
-    this.imageFiles = imageFiles;
+    this.pdfFile = pdfFile;
     this.excelFile = excelFile;
     this.targetWorkbook = new ExcelJS.Workbook();
     const config = new Config();
@@ -58,13 +62,13 @@ export class ImageMatcher {
    * 主处理方法
    */
   async process(): Promise<{ workbook: ExcelJS.Workbook; statistics: any }> {
-    console.log('=== 开始图片模式处理 ===');
+    console.log('=== 开始PDF模式处理 ===');
 
     // 1. 加载Excel文件（会自动清理共享公式）
     await this.loadExcelFile();
 
-    // 2. 识别图片表格
-    await this.recognizeImageTable();
+    // 2. 识别PDF表格
+    await this.recognizePDFTable();
 
     // 3. 匹配机构和授信品种
     this.matchOrganizationsAndCreditTypes();
@@ -85,7 +89,7 @@ export class ImageMatcher {
       unmatchedCount: this.mappings.filter(m => !m.targetRowIndex).length,
     };
 
-    console.log('=== 图片模式处理完成 ===');
+    console.log('=== PDF模式处理完成 ===');
     console.log('总机构数:', statistics.totalOrganizations);
     console.log('匹配成功:', statistics.matchedCount);
     console.log('匹配失败:', statistics.unmatchedCount);
@@ -134,7 +138,7 @@ export class ImageMatcher {
   }
 
   /**
-   * 清理所有共享公式（在加载后立即执行）
+   * 清理所有共享公式
    */
   private cleanupAllSharedFormulas(): void {
     console.log('\\n=== 清理所有共享公式 ===');
@@ -145,11 +149,8 @@ export class ImageMatcher {
         row.eachCell((cell, colNumber) => {
           try {
             const cellData = cell as any;
-            // 检查是否有共享公式
             if (cellData.sharedFormula) {
-              // 获取公式的计算结果
               const result = cellData.result;
-              // 清除共享公式引用，直接使用计算结果
               if (result !== undefined && result !== null) {
                 cell.value = result;
               } else {
@@ -171,41 +172,73 @@ export class ImageMatcher {
   }
 
   /**
-   * 识别图片表格
+   * 识别PDF表格
    */
-  private async recognizeImageTable(): Promise<void> {
-    console.log('识别图片表格...');
+  private async recognizePDFTable(): Promise<void> {
+    console.log('识别PDF表格...');
 
-    for (let i = 0; i < this.imageFiles.length; i++) {
-      const imageFile = this.imageFiles[i];
-      console.log(`正在处理第 ${i + 1} 张图片...`);
+    // 将PDF转换为Buffer并保存为临时文件
+    let pdfBuffer: Buffer;
+    if (this.pdfFile instanceof File) {
+      const arrayBuffer = await this.pdfFile.arrayBuffer();
+      pdfBuffer = Buffer.from(arrayBuffer);
+    } else {
+      pdfBuffer = this.pdfFile;
+    }
 
-      try {
-        // 将图片转换为 Buffer
-        let imageBuffer: Buffer;
-        if (imageFile instanceof File) {
-          const arrayBuffer = await imageFile.arrayBuffer();
-          imageBuffer = Buffer.from(arrayBuffer);
-        } else {
-          imageBuffer = imageFile;
-        }
+    // 创建临时目录
+    const sessionId = Date.now();
+    const sessionDir = `${TEMP_DIR}/${sessionId}`;
+    if (!existsSync(TEMP_DIR)) {
+      mkdirSync(TEMP_DIR, { recursive: true });
+    }
+    mkdirSync(sessionDir, { recursive: true });
 
-        // 转换为 Base64
-        const imageBase64 = imageBuffer.toString('base64');
-        
-        // 判断图片类型
-        const mimeType = this.getMimeType(imageFile);
-        const dataUri = `data:${mimeType};base64,${imageBase64}`;
+    // 保存PDF文件
+    const pdfPath = `${sessionDir}/input.pdf`;
+    fs.writeFileSync(pdfPath, pdfBuffer);
 
-        // 使用Vision LLM识别表格
-        const messages = [
-          {
-            role: 'user' as const,
-            content: [
-              {
-                type: 'text' as const,
-                text: `请识别这个图片中的表格内容。
-这是一个扫描版文档的页面，内容是一个表格。
+    console.log('正在将PDF转换为图片...');
+
+    try {
+      // 使用 pdftoppm 将 PDF 转换为 PNG 图片
+      const outputPrefix = `${sessionDir}/page`;
+      execSync(`pdftoppm -png -r 200 "${pdfPath}" "${outputPrefix}"`, {
+        timeout: 60000, // 60秒超时
+      });
+
+      // 获取生成的图片文件列表
+      const imageFiles = fs.readdirSync(sessionDir)
+        .filter(f => f.endsWith('.png'))
+        .sort()
+        .map(f => `${sessionDir}/${f}`);
+
+      console.log(`共转换 ${imageFiles.length} 页PDF`);
+
+      if (imageFiles.length === 0) {
+        throw new Error('无法从PDF中提取页面');
+      }
+
+      // 对每一页进行OCR识别
+      for (let i = 0; i < imageFiles.length; i++) {
+        const imagePath = imageFiles[i];
+        const pageNum = i + 1;
+        console.log(`正在处理第 ${pageNum} 页...`);
+
+        try {
+          const imageBuffer = fs.readFileSync(imagePath);
+          const imageBase64 = imageBuffer.toString('base64');
+          const dataUri = `data:image/png;base64,${imageBase64}`;
+
+          // 使用Vision LLM识别表格
+          const messages = [
+            {
+              role: 'user' as const,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: `请识别这个图片中的表格内容。
+这是一个扫描版PDF的页面，内容是一个WORD文档中的表格。
 
 请提取表格中的以下信息：
 - 第3列：机构名称
@@ -228,75 +261,74 @@ export class ImageMatcher {
 2. 金额请提取数字部分，不要包含单位（亿元、万元等）
 3. 如果某个单元格为空或无法识别，请跳过该行
 4. 只返回JSON数据，不要有其他说明文字`,
-              },
-              {
-                type: 'image_url' as const,
-                image_url: {
-                  url: dataUri,
-                  detail: 'high' as const,
                 },
-              },
-            ],
-          },
-        ];
+                {
+                  type: 'image_url' as const,
+                  image_url: {
+                    url: dataUri,
+                    detail: 'high' as const,
+                  },
+                },
+              ],
+            },
+          ];
 
-        const response = await this.llmClient.invoke(messages, {
-          model: 'doubao-seed-1-6-vision-250815',
-          temperature: 0.1,
-        });
+          const response = await this.llmClient.invoke(messages, {
+            model: 'doubao-seed-1-6-vision-250815',
+            temperature: 0.1,
+          });
 
-        console.log(`第 ${i + 1} 张图片识别结果:`, response.content.substring(0, 200) + '...');
+          console.log(`第 ${pageNum} 页识别结果:`, response.content.substring(0, 200) + '...');
 
-        // 解析JSON结果
-        try {
-          let jsonStr = response.content;
-          const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            jsonStr = jsonMatch[0];
-          }
+          // 解析JSON结果
+          try {
+            let jsonStr = response.content;
+            const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              jsonStr = jsonMatch[0];
+            }
 
-          const result = JSON.parse(jsonStr);
-          if (result.tableData && Array.isArray(result.tableData)) {
-            this.imageData.push(...result.tableData);
+            const result = JSON.parse(jsonStr);
+            if (result.tableData && Array.isArray(result.tableData)) {
+              this.pdfData.push(...result.tableData);
+            }
+          } catch (error) {
+            console.error(`第 ${pageNum} 页JSON解析失败:`, error);
           }
         } catch (error) {
-          console.error(`第 ${i + 1} 张图片JSON解析失败:`, error);
+          console.error(`第 ${pageNum} 页处理失败:`, error);
         }
-      } catch (error) {
-        console.error(`第 ${i + 1} 张图片处理失败:`, error);
       }
+
+      // 清理临时文件
+      try {
+        rmSync(sessionDir, { recursive: true, force: true });
+      } catch (e) {
+        console.warn('清理临时文件失败:', e);
+      }
+
+    } catch (error) {
+      // 清理临时文件
+      try {
+        rmSync(sessionDir, { recursive: true, force: true });
+      } catch (e) {
+        // 忽略清理错误
+      }
+      console.error('PDF转换错误:', error);
+      throw new Error('PDF文件转换失败，请确保PDF文件格式正确');
     }
 
-    if (this.imageData.length === 0) {
-      throw new Error('无法从图片中提取任何数据，请检查图片内容');
+    if (this.pdfData.length === 0) {
+      throw new Error('无法从PDF中提取任何数据，请检查PDF文件内容');
     }
 
-    console.log(`成功识别 ${this.imageData.length} 个机构的数据`);
-    this.imageData.forEach((item, index) => {
+    console.log(`成功识别 ${this.pdfData.length} 个机构的数据`);
+    this.pdfData.forEach((item, index) => {
       console.log(`  ${index + 1}. ${item.orgName}: ${item.creditTypes.length}个授信品种`);
       item.creditTypes.forEach(ct => {
         console.log(`     - ${ct.type}: ${ct.amount}`);
       });
     });
-  }
-
-  /**
-   * 获取 MIME 类型
-   */
-  private getMimeType(file: File | Buffer): string {
-    if (file instanceof File) {
-      if (file.type.startsWith('image/')) {
-        return file.type;
-      }
-      // 根据扩展名判断
-      const name = file.name.toLowerCase();
-      if (name.endsWith('.png')) return 'image/png';
-      if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
-      if (name.endsWith('.gif')) return 'image/gif';
-      if (name.endsWith('.webp')) return 'image/webp';
-    }
-    // 默认返回 PNG
-    return 'image/png';
   }
 
   /**
@@ -306,10 +338,10 @@ export class ImageMatcher {
     console.log('\\n=== 开始匹配机构和授信品种 ===');
 
     // 初始化mapping
-    for (const imageItem of this.imageData) {
+    for (const pdfItem of this.pdfData) {
       const mapping = {
-        orgName: imageItem.orgName,
-        creditTypes: imageItem.creditTypes.map(ct => ({
+        orgName: pdfItem.orgName,
+        creditTypes: pdfItem.creditTypes.map(ct => ({
           type: ct.type,
           amount: ct.amount,
           filled: false,
@@ -329,7 +361,7 @@ export class ImageMatcher {
           this.sourceSheet单体,
           normalizedOrgName,
           '单体',
-          'B' // 单体表机构在B列
+          'B'
         );
         if (result) {
           mapping.matchedOrgName = result.orgName;
@@ -346,7 +378,7 @@ export class ImageMatcher {
           this.sourceSheet集团,
           normalizedOrgName,
           '集团',
-          'D' // 集团表机构在D列
+          'D'
         );
         if (result) {
           mapping.matchedOrgName = result.orgName;
@@ -402,15 +434,10 @@ export class ImageMatcher {
   /**
    * 匹配授信品种列
    */
-  private matchCreditTypeColumns(
-    mapping: any,
-    sheet: ExcelJS.Worksheet
-  ): void {
-    // 获取第3行的授信品种字段名
+  private matchCreditTypeColumns(mapping: any, sheet: ExcelJS.Worksheet): void {
     const headerRow = sheet.getRow(3);
     const creditTypeMap = new Map<string, number>();
 
-    // 从E列开始遍历（列索引5）
     for (let col = 5; col <= 50; col++) {
       const cell = headerRow.getCell(col);
       const value = String(cell.value || '').trim();
@@ -421,14 +448,11 @@ export class ImageMatcher {
 
     console.log(`  工作表中的授信品种:`, Array.from(creditTypeMap.keys()));
 
-    // 匹配每个授信品种
     for (const ct of mapping.creditTypes) {
-      // 尝试精确匹配
       if (creditTypeMap.has(ct.type)) {
         ct.colIndex = creditTypeMap.get(ct.type);
         console.log(`    授信品种匹配成功: ${ct.type} -> 列${ct.colIndex}`);
       } else {
-        // 尝试模糊匹配
         for (const [header, colIndex] of creditTypeMap.entries()) {
           if (header.includes(ct.type) || ct.type.includes(header)) {
             ct.colIndex = colIndex;
@@ -464,7 +488,6 @@ export class ImageMatcher {
         const cell = sheet.getCell(mapping.targetRowIndex, ct.colIndex);
         const oldValue = cell.value;
         
-        // 填充新金额
         cell.value = ct.amount;
 
         ct.filled = true;
@@ -479,7 +502,6 @@ export class ImageMatcher {
   private removeExtraCreditTypes(): void {
     console.log('\\n=== 开始删除多余的授信品种数据 ===');
 
-    // 收集每个机构应该保留的授信品种列
     const orgCreditTypes = new Map<string, Set<number>>();
 
     for (const mapping of this.mappings) {
@@ -490,7 +512,6 @@ export class ImageMatcher {
         orgCreditTypes.set(key, new Set());
       }
 
-      // 添加该机构在图片中提到的授信品种列
       for (const ct of mapping.creditTypes) {
         if (ct.colIndex) {
           orgCreditTypes.get(key)!.add(ct.colIndex);
@@ -498,7 +519,6 @@ export class ImageMatcher {
       }
     }
 
-    // 删除多余的授信品种数据
     for (const mapping of this.mappings) {
       if (!mapping.targetRowIndex || !mapping.sourceSheet) continue;
 
@@ -508,26 +528,12 @@ export class ImageMatcher {
       const key = `${mapping.sourceSheet}-${mapping.targetRowIndex}`;
       const allowedCols = orgCreditTypes.get(key);
 
-      // 遍历该行的所有授信品种列（从E列开始）
       for (let col = 5; col <= 50; col++) {
         const cell = sheet.getCell(mapping.targetRowIndex, col);
         
-        // 如果该列有值，但不在允许列表中，则删除
         if (cell.value !== null && cell.value !== undefined && 
             allowedCols && !allowedCols.has(col)) {
           const oldValue = cell.value;
-          
-          // 检查是否包含公式
-          try {
-            const cellData = cell as any;
-            if (cellData.formula || cellData.sharedFormula) {
-              console.log(`  删除多余数据(含公式): ${mapping.orgName} 列${col}`);
-            }
-          } catch (e) {
-            // 忽略错误
-          }
-          
-          // 直接赋值null会自动清除公式
           cell.value = null;
           console.log(`  删除多余数据: ${mapping.orgName} 列${col} (${oldValue})`);
         }
@@ -543,22 +549,18 @@ export class ImageMatcher {
 
     const newWorkbook = new ExcelJS.Workbook();
 
-    // 复制所有工作表
     this.targetWorkbook.eachSheet((sourceSheet, sheetId) => {
       const newSheet = newWorkbook.addWorksheet(sourceSheet.name);
 
-      // 复制列宽
       sourceSheet.columns.forEach((col, index) => {
         if (col.width) {
           newSheet.getColumn(index + 1).width = col.width;
         }
       });
 
-      // 获取实际使用的行列范围
       const maxRow = sourceSheet.rowCount || 200;
       const maxCol = sourceSheet.columnCount || 50;
 
-      // 复制所有单元格（包括空单元格，保留边框）
       for (let rowNumber = 1; rowNumber <= maxRow; rowNumber++) {
         const sourceRow = sourceSheet.getRow(rowNumber);
         const newRow = newSheet.getRow(rowNumber);
@@ -568,11 +570,9 @@ export class ImageMatcher {
           const sourceCell = sourceRow.getCell(colNumber);
           const newCell = newRow.getCell(colNumber);
 
-          // 复制值和公式（保留公式，不用结果替换）
           try {
             const cellData = sourceCell as any;
             
-            // 检查是否有公式（保留公式）- 使用try-catch保护
             let hasFormula = false;
             let hasSharedFormula = false;
             let formulaValue = null;
@@ -584,9 +584,7 @@ export class ImageMatcher {
                 hasFormula = true;
                 formulaValue = cellData.formula;
               }
-            } catch (e) {
-              // formula属性访问失败，忽略
-            }
+            } catch (e) {}
 
             try {
               if (cellData.sharedFormula) {
@@ -594,15 +592,11 @@ export class ImageMatcher {
                 sharedFormulaValue = cellData.sharedFormula;
                 resultValue = cellData.result;
               }
-            } catch (e) {
-              // sharedFormula属性访问失败，忽略
-            }
+            } catch (e) {}
 
             if (hasFormula && formulaValue) {
-              // 有公式，复制公式
               newCell.value = { formula: formulaValue };
             } else if (hasSharedFormula && sharedFormulaValue) {
-              // 有共享公式，复制共享公式
               if (resultValue !== undefined && resultValue !== null) {
                 newCell.value = { 
                   sharedFormula: sharedFormulaValue, 
@@ -612,18 +606,14 @@ export class ImageMatcher {
                 newCell.value = { sharedFormula: sharedFormulaValue };
               }
             } else {
-              // 无公式，复制值
               newCell.value = sourceCell.value;
             }
           } catch (e) {
-            // 如果公式处理失败，直接复制值
             newCell.value = sourceCell.value;
           }
 
-          // 复制样式（包括边框）
           try {
             if (sourceCell.style) {
-              // 使用model来复制样式
               const styleModel = (sourceCell as any).model;
               if (styleModel && styleModel.style) {
                 newCell.style = { ...styleModel.style };
@@ -640,8 +630,6 @@ export class ImageMatcher {
             if (sourceCell.border) {
               newCell.border = JSON.parse(JSON.stringify(sourceCell.border));
             } else {
-              // 如果原单元格没有边框，但有数据的单元格有边框，则设置默认边框
-              // 检查同行其他单元格是否有边框
               const firstDataCell = sourceRow.getCell(1);
               if (firstDataCell && firstDataCell.border) {
                 newCell.border = JSON.parse(JSON.stringify(firstDataCell.border));
@@ -653,21 +641,16 @@ export class ImageMatcher {
             if (sourceCell.numFmt) {
               newCell.numFmt = sourceCell.numFmt;
             }
-          } catch (e) {
-            // 样式复制失败，忽略
-          }
+          } catch (e) {}
         }
       }
 
-      // 复制合并单元格
       const merges = (sourceSheet as any)._merges;
       if (merges) {
         Object.values(merges).forEach((merge: any) => {
           try {
             newSheet.mergeCells(merge);
-          } catch (e) {
-            // 忽略合并错误
-          }
+          } catch (e) {}
         });
       }
 

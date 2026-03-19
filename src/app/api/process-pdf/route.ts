@@ -44,12 +44,18 @@ export async function POST(request: NextRequest) {
     // Excel会在打开时自动计算公式
     const buffer = await result.workbook.xlsx.writeBuffer();
 
+    // 生成新文件名：日期+原文件名（如 260319测试.xlsx）
+    const originalName = excelFile.name.replace(/\.(xlsx|xls)$/i, ''); // 去掉扩展名
+    const now = new Date();
+    const datePrefix = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    const newFileName = `${datePrefix}${originalName}.xlsx`;
+
     // 返回文件
     return new NextResponse(buffer, {
       status: 200,
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename="processed_${Date.now()}.xlsx"`,
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(newFileName)}"`,
       },
     });
   } catch (error: any) {

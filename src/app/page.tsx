@@ -163,12 +163,22 @@ export default function Home() {
           throw new Error(errorData.error || '处理失败');
         }
 
+        // 从响应头获取文件名
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = `PDF处理结果_${Date.now()}.xlsx`;
+        if (contentDisposition) {
+          const filenameMatch = contentDisposition.match(/filename\*?=['"]?(?:UTF-\d['"]*)?([^;'"]+)/i);
+          if (filenameMatch) {
+            filename = decodeURIComponent(filenameMatch[1]);
+          }
+        }
+
         // 直接下载文件
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `PDF处理结果_${Date.now()}.xlsx`;
+        link.download = filename;
         link.click();
         window.URL.revokeObjectURL(url);
         

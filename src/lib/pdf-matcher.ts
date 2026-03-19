@@ -132,43 +132,6 @@ export class PDFMatcher {
     if (!this.sourceSheet单体 && !this.sourceSheet集团) {
       throw new Error('Excel文件中未找到"单体"或"集团"工作表');
     }
-
-    // 加载后立即清理所有共享公式
-    this.cleanupAllSharedFormulas();
-  }
-
-  /**
-   * 清理所有共享公式
-   */
-  private cleanupAllSharedFormulas(): void {
-    console.log('\\n=== 清理所有共享公式 ===');
-
-    this.targetWorkbook.eachSheet((worksheet, sheetId) => {
-      let cleanedCount = 0;
-      worksheet.eachRow((row, rowNumber) => {
-        row.eachCell((cell, colNumber) => {
-          try {
-            const cellData = cell as any;
-            if (cellData.sharedFormula) {
-              const result = cellData.result;
-              if (result !== undefined && result !== null) {
-                cell.value = result;
-              } else {
-                cell.value = null;
-              }
-              cleanedCount++;
-            }
-          } catch (e) {
-            // 忽略错误
-          }
-        });
-      });
-      if (cleanedCount > 0) {
-        console.log(`  工作表 "${worksheet.name}" 清理了 ${cleanedCount} 个共享公式`);
-      }
-    });
-
-    console.log('共享公式清理完成');
   }
 
   /**
@@ -488,6 +451,7 @@ export class PDFMatcher {
         const cell = sheet.getCell(mapping.targetRowIndex, ct.colIndex);
         const oldValue = cell.value;
         
+        // 设置新值
         cell.value = ct.amount;
 
         ct.filled = true;
@@ -542,7 +506,7 @@ export class PDFMatcher {
   }
 
   /**
-   * 创建干净的工作簿（保留样式，不复制共享公式）
+   * 创建干净的工作簿（只保留值和样式，不复制任何公式）
    */
   private async createCleanWorkbook(): Promise<ExcelJS.Workbook> {
     console.log('\\n=== 创建干净的工作簿 ===');
@@ -552,6 +516,7 @@ export class PDFMatcher {
     this.targetWorkbook.eachSheet((sourceSheet, sheetId) => {
       const newSheet = newWorkbook.addWorksheet(sourceSheet.name);
 
+      // 复制列宽
       sourceSheet.columns.forEach((col, index) => {
         if (col.width) {
           newSheet.getColumn(index + 1).width = col.width;
@@ -561,6 +526,7 @@ export class PDFMatcher {
       const maxRow = sourceSheet.rowCount || 200;
       const maxCol = sourceSheet.columnCount || 50;
 
+      // 按行按列复制数据
       for (let rowNumber = 1; rowNumber <= maxRow; rowNumber++) {
         const sourceRow = sourceSheet.getRow(rowNumber);
         const newRow = newSheet.getRow(rowNumber);
@@ -570,55 +536,34 @@ export class PDFMatcher {
           const sourceCell = sourceRow.getCell(colNumber);
           const newCell = newRow.getCell(colNumber);
 
+          // 只复制值，不复制公式
           try {
             const cellData = sourceCell as any;
+            let cellValue = sourceCell.value;
             
-            // 检查是否有普通公式
-            let hasFormula = false;
-            let formulaValue = null;
-            
-            try {
-              if (cellData.formula && !cellData.sharedFormula) {
-                hasFormula = true;
-                formulaValue = cellData.formula;
+            // 如果单元格包含公式（普通公式或共享公式），使用结果值
+            if (cellData.formula || cellData.sharedFormula) {
+              try {
+                const result = cellData.result;
+                if (result !== undefined && result !== null) {
+                  cellValue = result;
+                } else {
+                  cellValue = null;
+                }
+              } catch (e) {
+                // 如果获取结果失败，尝试获取value
+                cellValue = sourceCell.value;
               }
-            } catch (e) {}
-
-            if (hasFormula && formulaValue) {
-              // 只复制普通公式，不复制共享公式
-              newCell.value = { formula: formulaValue };
-            } else {
-              // 对于共享公式或普通单元格，直接使用值（不复制公式）
-              // 这样可以避免"Shared Formula master must exist above and or left of clone"错误
-              let cellValue = sourceCell.value;
-              
-              // 如果是共享公式，尝试获取结果值
-              if (cellData.sharedFormula) {
-                try {
-                  const result = cellData.result;
-                  if (result !== undefined && result !== null) {
-                    cellValue = result;
-                  }
-                } catch (e) {}
-              }
-              
-              newCell.value = cellValue;
             }
+            
+            newCell.value = cellValue;
           } catch (e) {
-            // 如果出现任何错误，直接复制值
+            // 出错时直接使用原始值
             newCell.value = sourceCell.value;
           }
 
+          // 复制样式
           try {
-            // 复制样式
-            if (sourceCell.style) {
-              const styleModel = (sourceCell as any).model;
-              if (styleModel && styleModel.style) {
-                newCell.style = { ...styleModel.style };
-              } else {
-                newCell.style = JSON.parse(JSON.stringify(sourceCell.style));
-              }
-            }
             if (sourceCell.font) {
               newCell.font = JSON.parse(JSON.stringify(sourceCell.font));
             }
@@ -628,6 +573,7 @@ export class PDFMatcher {
             if (sourceCell.border) {
               newCell.border = JSON.parse(JSON.stringify(sourceCell.border));
             } else {
+              // 尝试使用第一列的边框样式
               const firstDataCell = sourceRow.getCell(1);
               if (firstDataCell && firstDataCell.border) {
                 newCell.border = JSON.parse(JSON.stringify(firstDataCell.border));
@@ -639,18 +585,26 @@ export class PDFMatcher {
             if (sourceCell.numFmt) {
               newCell.numFmt = sourceCell.numFmt;
             }
-          } catch (e) {}
+          } catch (e) {
+            // 忽略样式复制错误
+          }
         }
       }
 
       // 复制合并单元格
-      const merges = (sourceSheet as any)._merges;
-      if (merges) {
-        Object.values(merges).forEach((merge: any) => {
-          try {
-            newSheet.mergeCells(merge);
-          } catch (e) {}
-        });
+      try {
+        const merges = (sourceSheet as any)._merges;
+        if (merges) {
+          Object.values(merges).forEach((merge: any) => {
+            try {
+              newSheet.mergeCells(merge);
+            } catch (e) {
+              // 忽略合并错误
+            }
+          });
+        }
+      } catch (e) {
+        // 忽略合并单元格复制错误
       }
 
       console.log(`  复制工作表: ${sourceSheet.name}`);

@@ -689,43 +689,60 @@ export class PDFMatcher {
 
   /**
    * 计算单体表汇总值
-   * D列 = 设置SUM公式，如 =SUM(E4:Z4)
+   * D列 = 设置SUM公式，使用原始文件的范围（E:AB或更宽）
    */
   private calculateDanTiSummary(sheet: ExcelJS.Worksheet): void {
     console.log('\\n计算单体表汇总值 (D列):');
     let calculatedCount = 0;
+
+    // 获取原始的SUM公式范围，通常是 E:AB 或更宽
+    // 如果无法获取原始范围，默认使用 E:AC（第5列到第29列）
+    const defaultStartCol = 5; // E列
+    const defaultEndCol = 29;  // AC列（覆盖常见的授信品种范围）
 
     for (const mapping of this.mappings) {
       if (!mapping.targetRowIndex || mapping.sourceSheet !== '单体') continue;
 
       const row = mapping.targetRowIndex;
       
-      // 找出有数据的列范围
-      let startCol = 0;
-      let endCol = 0;
-      for (let col = 5; col <= 50; col++) {
-        const cell = sheet.getCell(row, col);
-        const value = cell.value;
-        if (typeof value === 'number' && value !== 0) {
-          if (startCol === 0) startCol = col;
-          endCol = col;
+      // 检查原始D列是否有SUM公式，如果有则保留其范围
+      const dCell = sheet.getCell(row, 4);
+      const dModel = dCell.model || {};
+      let startCol = defaultStartCol;
+      let endCol = defaultEndCol;
+      
+      if (dModel.formula && dModel.formula.startsWith('SUM(')) {
+        // 解析原始公式范围，如 SUM(E4:AB4)
+        const match = dModel.formula.match(/SUM\(([A-Z]+)(\d+):([A-Z]+)(\d+)\)/i);
+        if (match) {
+          startCol = this.letterToColumn(match[1]);
+          endCol = this.letterToColumn(match[3]);
+          console.log(`  行${row}: 使用原始SUM范围 ${match[1]}:${match[3]}`);
         }
       }
 
       // 设置SUM公式
-      if (startCol > 0 && endCol >= startCol) {
-        const startColLetter = this.columnToLetter(startCol);
-        const endColLetter = this.columnToLetter(endCol);
-        const formula = `SUM(${startColLetter}${row}:${endColLetter}${row})`;
-        
-        const summaryCell = sheet.getCell(row, 4); // D列
-        summaryCell.value = { formula: formula };
-        calculatedCount++;
-        console.log(`  行${row}: D列公式 = =${formula}`);
-      }
+      const startColLetter = this.columnToLetter(startCol);
+      const endColLetter = this.columnToLetter(endCol);
+      const formula = `SUM(${startColLetter}${row}:${endColLetter}${row})`;
+      
+      dCell.value = { formula: formula };
+      calculatedCount++;
+      console.log(`  行${row}: D列公式 = =${formula}`);
     }
 
     console.log(`单体表汇总计算完成，共 ${calculatedCount} 行`);
+  }
+
+  /**
+   * 列字母转列号（如 E -> 5, AB -> 28）
+   */
+  private letterToColumn(letter: string): number {
+    let column = 0;
+    for (let i = 0; i < letter.length; i++) {
+      column = column * 26 + (letter.charCodeAt(i) - 64);
+    }
+    return column;
   }
 
   /**

@@ -6,10 +6,10 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Upload, FileSpreadsheet, Download, Loader2, CheckCircle, AlertCircle, X, FileText } from 'lucide-react';
+import { Upload, FileSpreadsheet, Download, Loader2, CheckCircle, AlertCircle, X, FileText, Image as ImageIcon } from 'lucide-react';
 import { toast } from 'sonner';
 
-type ProcessMode = 'normal' | 'credit' | 'pdf';
+type ProcessMode = 'normal' | 'credit' | 'image';
 
 interface FileUploadProps {
   label: string;
@@ -85,11 +85,99 @@ function FileUpload({ label, description, file, onFileChange, acceptedTypes }: F
   );
 }
 
+// 多图片上传组件
+function MultiImageUpload({ 
+  label, 
+  description, 
+  files, 
+  onFilesChange 
+}: { 
+  label: string; 
+  description: string; 
+  files: File[]; 
+  onFilesChange: (files: File[]) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  
+  const handleClick = () => {
+    inputRef.current?.click();
+  };
+  
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newFiles = Array.from(e.target.files || []);
+    onFilesChange([...files, ...newFiles]);
+    if (inputRef.current) {
+      inputRef.current.value = '';
+    }
+  };
+
+  const handleDelete = (index: number) => {
+    const newFiles = files.filter((_, i) => i !== index);
+    onFilesChange(newFiles);
+  };
+
+  return (
+    <Card className="p-6">
+      <div className="space-y-4">
+        <div>
+          <Label className="text-base font-semibold">{label}</Label>
+          <p className="text-sm text-muted-foreground mt-1">{description}</p>
+        </div>
+        
+        {files.length > 0 && (
+          <div className="space-y-2">
+            {files.map((file, index) => (
+              <div key={index} className="flex items-center gap-3">
+                <div className="flex-1 flex items-center gap-2 text-sm text-green-600 bg-green-50 dark:bg-green-950/20 px-3 py-1.5 rounded-md">
+                  <ImageIcon className="h-4 w-4" />
+                  <span className="max-w-[300px] truncate">{file.name}</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleDelete(index)}
+                  className="h-8 w-8 p-0 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/20"
+                  title="删除图片"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+        
+        <div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleClick}
+            className="w-full h-9 justify-start text-left px-3"
+          >
+            <Upload className="mr-2 h-4 w-4" />
+            <span className="text-muted-foreground">
+              {files.length > 0 ? '继续添加图片' : '选择图片'}
+            </span>
+          </Button>
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleFileChange}
+            className="hidden"
+          />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export default function Home() {
   const [mode, setMode] = useState<ProcessMode>('normal');
   const [fileA, setFileA] = useState<File | null>(null);
   const [fileB, setFileB] = useState<File | null>(null);
-  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [excelFile, setExcelFile] = useState<File | null>(null);
   const [processing, setProcessing] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -121,8 +209,8 @@ export default function Home() {
     clearProcessedState();
   };
 
-  const handlePdfFileChange = (file: File | null) => {
-    setPdfFile(file);
+  const handleImageFilesChange = (files: File[]) => {
+    setImageFiles(files);
     clearProcessedState();
   };
 
@@ -137,12 +225,12 @@ export default function Home() {
   };
 
   const handleProcess = async () => {
-    if (mode === 'pdf') {
-      // PDF模式处理
-      console.log('PDF模式处理 - pdfFile:', pdfFile?.name, 'excelFile:', excelFile?.name);
+    if (mode === 'image') {
+      // 图片模式处理
+      console.log('图片模式处理 - imageFiles:', imageFiles.length, 'excelFile:', excelFile?.name);
       
-      if (!pdfFile || !excelFile) {
-        toast.error('请上传PDF文件和Excel文件');
+      if (imageFiles.length === 0 || !excelFile) {
+        toast.error('请上传图片文件和Excel文件');
         return;
       }
 
@@ -150,10 +238,12 @@ export default function Home() {
       
       try {
         const formData = new FormData();
-        formData.append('pdfFile', pdfFile);
+        imageFiles.forEach((file, index) => {
+          formData.append(`imageFile${index}`, file);
+        });
         formData.append('excelFile', excelFile);
 
-        const response = await fetch('/api/process-pdf', {
+        const response = await fetch('/api/process-image', {
           method: 'POST',
           body: formData,
         });
@@ -168,11 +258,11 @@ export default function Home() {
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `PDF处理结果_${Date.now()}.xlsx`;
+        link.download = `图片处理结果_${Date.now()}.xlsx`;
         link.click();
         window.URL.revokeObjectURL(url);
         
-        toast.success('PDF处理完成，文件已下载！');
+        toast.success('图片处理完成，文件已下载！');
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : '处理失败，请重试';
         toast.error(errorMessage);
@@ -270,15 +360,14 @@ export default function Home() {
 
   // 根据模式获取文件上传组件
   const renderFileUploads = () => {
-    if (mode === 'pdf') {
+    if (mode === 'image') {
       return (
         <div className="space-y-6">
-          <FileUpload
-            label="文件A（PDF扫描件）"
-            description="上传扫描版PDF文件，包含机构名称和授信品种及金额表格"
-            file={pdfFile}
-            onFileChange={handlePdfFileChange}
-            acceptedTypes=".pdf"
+          <MultiImageUpload
+            label="文件A（扫描图片）"
+            description="上传扫描版图片文件（支持多张），包含机构名称和授信品种及金额表格"
+            files={imageFiles}
+            onFilesChange={handleImageFilesChange}
           />
 
           <FileUpload
@@ -316,15 +405,15 @@ export default function Home() {
   // 获取处理按钮是否禁用
   const isProcessDisabled = () => {
     if (processing) return true;
-    if (mode === 'pdf') {
-      return !pdfFile || !excelFile;
+    if (mode === 'image') {
+      return imageFiles.length === 0 || !excelFile;
     }
     return !fileA || !fileB;
   };
 
-  // 获取下载按钮是否禁用（PDF模式直接下载，不需要下载按钮）
+  // 获取下载按钮是否禁用（图片模式直接下载，不需要下载按钮）
   const isDownloadDisabled = () => {
-    if (mode === 'pdf') return true;
+    if (mode === 'image') return true;
     return downloading || !hasProcessedFile;
   };
 
@@ -370,11 +459,11 @@ export default function Home() {
                 </div>
               </div>
               <div className="flex items-center space-x-2 p-4 border rounded-lg hover:bg-muted/50 cursor-pointer">
-                <RadioGroupItem value="pdf" id="pdf" />
+                <RadioGroupItem value="image" id="image" />
                 <div className="flex-1">
-                  <Label htmlFor="pdf" className="font-medium cursor-pointer">PDF模式</Label>
+                  <Label htmlFor="image" className="font-medium cursor-pointer">图片模式</Label>
                   <p className="text-xs text-muted-foreground mt-1">
-                    识别扫描PDF表格，自动填充金额
+                    识别扫描图片表格，自动填充金额
                   </p>
                 </div>
               </div>
@@ -385,16 +474,16 @@ export default function Home() {
         {/* 功能说明 */}
         <Card className="p-6 bg-muted/50">
           <h3 className="font-semibold mb-3">
-            {mode === 'pdf' ? 'PDF模式功能' : '支持的功能'}
+            {mode === 'image' ? '图片模式功能' : '支持的功能'}
           </h3>
-          {mode === 'pdf' ? (
+          {mode === 'image' ? (
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
-              <li>✓ OCR识别扫描版PDF表格</li>
+              <li>✓ OCR识别扫描版图片表格</li>
               <li>✓ 自动提取机构名称和授信品种</li>
               <li>✓ 智能匹配单体表和集团表</li>
-              <li>✓ 自动填充金额并标记红色</li>
+              <li>✓ 自动填充金额</li>
               <li>✓ 删除多余的授信品种数据</li>
-              <li>✓ 修改内容用红色字体显示</li>
+              <li>✓ 支持多张图片批量处理</li>
             </ul>
           ) : (
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
@@ -424,9 +513,9 @@ export default function Home() {
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 处理中...
               </>
-            ) : mode === 'pdf' ? (
+            ) : mode === 'image' ? (
               <>
-                <FileText className="mr-2 h-4 w-4" />
+                <ImageIcon className="mr-2 h-4 w-4" />
                 识别并处理
               </>
             ) : (
@@ -437,7 +526,7 @@ export default function Home() {
             )}
           </Button>
 
-          {mode !== 'pdf' && (
+          {mode !== 'image' && (
             <div className="flex flex-col items-center gap-2">
               <Button
                 onClick={handleDownload}
@@ -478,13 +567,13 @@ export default function Home() {
             <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
             <div className="space-y-1 text-sm">
               <p className="font-medium text-amber-900 dark:text-amber-200">使用说明</p>
-              {mode === 'pdf' ? (
+              {mode === 'image' ? (
                 <ul className="text-amber-800 dark:text-amber-300/80 space-y-1 list-disc list-inside">
-                  <li>文件A必须是扫描版PDF，包含机构名称和授信品种表格</li>
+                  <li>文件A必须是扫描版图片，包含机构名称和授信品种表格</li>
+                  <li>支持上传多张图片进行批量处理</li>
                   <li>文件B必须包含"单体"或"集团"工作表</li>
                   <li>单体表机构字段在B列，授信品种在第3行</li>
                   <li>集团表机构字段在D列，授信品种在第3行</li>
-                  <li>修改的内容会用红色字体标记</li>
                 </ul>
               ) : (
                 <ul className="text-amber-800 dark:text-amber-300/80 space-y-1 list-disc list-inside">

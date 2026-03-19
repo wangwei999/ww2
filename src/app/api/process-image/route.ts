@@ -1,31 +1,46 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PDFMatcher } from '@/lib/pdf-matcher';
+import { ImageMatcher } from '@/lib/image-matcher';
 import { HeaderUtils } from 'coze-coding-dev-sdk';
 
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
-    const pdfFile = formData.get('pdfFile') as File;
+    
+    // 获取所有图片文件
+    const imageFiles: File[] = [];
+    let index = 0;
+    while (true) {
+      const file = formData.get(`imageFile${index}`) as File | null;
+      if (!file) break;
+      imageFiles.push(file);
+      index++;
+    }
+
     const excelFile = formData.get('excelFile') as File;
 
-    if (!pdfFile || !excelFile) {
+    if (imageFiles.length === 0 || !excelFile) {
       return NextResponse.json(
-        { error: '请上传PDF文件和Excel文件' },
+        { error: '请上传图片文件和Excel文件' },
         { status: 400 }
       );
     }
 
-    // 验证文件类型
-    if (!pdfFile.name.toLowerCase().endsWith('.pdf')) {
-      return NextResponse.json(
-        { error: '文件A必须是PDF格式' },
-        { status: 400 }
-      );
+    // 验证图片文件类型
+    const validImageTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'];
+    for (const imageFile of imageFiles) {
+      if (!validImageTypes.includes(imageFile.type) && 
+          !imageFile.name.toLowerCase().match(/\.(png|jpe?g|gif|webp)$/)) {
+        return NextResponse.json(
+          { error: `文件 ${imageFile.name} 不是有效的图片格式` },
+          { status: 400 }
+        );
+      }
     }
 
+    // 验证Excel文件类型
     if (!excelFile.name.toLowerCase().match(/\.(xlsx|xls)$/)) {
       return NextResponse.json(
-        { error: '文件B必须是Excel格式(.xlsx或.xls)' },
+        { error: 'Excel文件必须是.xlsx或.xls格式' },
         { status: 400 }
       );
     }
@@ -33,8 +48,8 @@ export async function POST(request: NextRequest) {
     // 提取请求头
     const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
 
-    // 创建PDF处理器
-    const matcher = new PDFMatcher(pdfFile, excelFile, customHeaders);
+    // 创建图片处理器
+    const matcher = new ImageMatcher(imageFiles, excelFile, customHeaders);
 
     // 处理文件
     const result = await matcher.process();
@@ -51,7 +66,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error: any) {
-    console.error('PDF模式处理失败:', error);
+    console.error('图片模式处理失败:', error);
     return NextResponse.json(
       { error: error.message || '处理失败，请重试' },
       { status: 500 }

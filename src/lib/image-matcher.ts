@@ -1,27 +1,16 @@
 import ExcelJS from 'exceljs';
 import { LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { normalizeOrganizationName } from './data-utils';
-import path from 'path';
-import fs from 'fs';
-
-// 动态导入的类型
-type PDFDocument = any;
-type PDFPage = any;
-type PDFJSLib = {
-  getDocument: (options: { data: Uint8Array; useSystemFonts?: boolean }) => { promise: Promise<PDFDocument> };
-  GlobalWorkerOptions: { workerSrc: string };
-};
-
-// Canvas 相关类型
-type CanvasType = any;
-type CanvasContext = any;
 
 /**
- * PDF模式处理器
- * 用于识别PDF中的表格数据并填充到Excel文件中
+ * 图片模式处理器
+ * 用于识别图片中的表格数据并填充到Excel文件中
+ * 
+ * 注意：由于沙箱环境不支持 canvas 原生模块，无法将 PDF 转换为图片。
+ * 用户需要将扫描版 PDF 先转换为图片（如截图），然后上传图片进行处理。
  */
-export class PDFMatcher {
-  private pdfFile: File | Buffer;
+export class ImageMatcher {
+  private imageFiles: File[] | Buffer[];
   private excelFile: File | Buffer;
   private targetWorkbook: ExcelJS.Workbook;
   private sourceSheet单体: ExcelJS.Worksheet | null = null;
@@ -29,8 +18,8 @@ export class PDFMatcher {
   private llmClient: LLMClient;
   private customHeaders: Record<string, string>;
 
-  // PDF识别结果
-  private pdfData: Array<{
+  // 图片识别结果
+  private imageData: Array<{
     orgName: string;
     creditTypes: Array<{
       type: string;
@@ -53,11 +42,11 @@ export class PDFMatcher {
   }> = [];
 
   constructor(
-    pdfFile: File | Buffer,
+    imageFiles: File[] | Buffer[],
     excelFile: File | Buffer,
     customHeaders: Record<string, string> = {}
   ) {
-    this.pdfFile = pdfFile;
+    this.imageFiles = imageFiles;
     this.excelFile = excelFile;
     this.targetWorkbook = new ExcelJS.Workbook();
     const config = new Config();
@@ -69,13 +58,13 @@ export class PDFMatcher {
    * 主处理方法
    */
   async process(): Promise<{ workbook: ExcelJS.Workbook; statistics: any }> {
-    console.log('=== 开始PDF模式处理 ===');
+    console.log('=== 开始图片模式处理 ===');
 
     // 1. 加载Excel文件（会自动清理共享公式）
     await this.loadExcelFile();
 
-    // 2. 识别PDF表格
-    await this.recognizePDFTable();
+    // 2. 识别图片表格
+    await this.recognizeImageTable();
 
     // 3. 匹配机构和授信品种
     this.matchOrganizationsAndCreditTypes();
@@ -96,7 +85,7 @@ export class PDFMatcher {
       unmatchedCount: this.mappings.filter(m => !m.targetRowIndex).length,
     };
 
-    console.log('=== PDF模式处理完成 ===');
+    console.log('=== 图片模式处理完成 ===');
     console.log('总机构数:', statistics.totalOrganizations);
     console.log('匹配成功:', statistics.matchedCount);
     console.log('匹配失败:', statistics.unmatchedCount);
@@ -182,75 +171,41 @@ export class PDFMatcher {
   }
 
   /**
-   * 识别PDF表格
+   * 识别图片表格
    */
-  private async recognizePDFTable(): Promise<void> {
-    console.log('识别PDF表格...');
+  private async recognizeImageTable(): Promise<void> {
+    console.log('识别图片表格...');
 
-    // 将PDF转换为Buffer
-    let pdfBuffer: Buffer;
+    for (let i = 0; i < this.imageFiles.length; i++) {
+      const imageFile = this.imageFiles[i];
+      console.log(`正在处理第 ${i + 1} 张图片...`);
 
-    if (this.pdfFile instanceof File) {
-      const arrayBuffer = await this.pdfFile.arrayBuffer();
-      pdfBuffer = Buffer.from(arrayBuffer);
-    } else {
-      pdfBuffer = this.pdfFile;
-    }
+      try {
+        // 将图片转换为 Buffer
+        let imageBuffer: Buffer;
+        if (imageFile instanceof File) {
+          const arrayBuffer = await imageFile.arrayBuffer();
+          imageBuffer = Buffer.from(arrayBuffer);
+        } else {
+          imageBuffer = imageFile;
+        }
 
-    console.log('正在将PDF转换为图片...');
+        // 转换为 Base64
+        const imageBase64 = imageBuffer.toString('base64');
+        
+        // 判断图片类型
+        const mimeType = this.getMimeType(imageFile);
+        const dataUri = `data:${mimeType};base64,${imageBase64}`;
 
-    try {
-      // 动态导入 pdfjs-dist 和 canvas（避免 Next.js webpack 兼容性问题）
-      const pdfjsLib = await import('pdfjs-dist');
-      const canvasModule = await import('canvas');
-      const createCanvas = canvasModule.createCanvas;
-
-      // 使用 pdfjs-dist 加载 PDF
-      const loadingTask = pdfjsLib.getDocument({
-        data: new Uint8Array(pdfBuffer),
-        useSystemFonts: true,
-      });
-
-      const pdfDocument = await loadingTask.promise;
-      const numPages = pdfDocument.numPages;
-      console.log(`PDF 共 ${numPages} 页`);
-
-      // 遍历每一页
-      for (let pageNum = 1; pageNum <= Math.min(numPages, 20); pageNum++) {
-        console.log(`正在处理第 ${pageNum} 页...`);
-
-        try {
-          const page = await pdfDocument.getPage(pageNum);
-          const scale = 2; // 高分辨率
-          const viewport = page.getViewport({ scale });
-
-          // 创建 canvas
-          const canvas = createCanvas(viewport.width, viewport.height);
-          const context = canvas.getContext('2d');
-
-          // 渲染页面（使用 any 绕过类型检查，因为 node-canvas 与 HTMLCanvasElement 类型不兼容）
-          const renderContext: any = {
-            canvasContext: context,
-            viewport: viewport,
-            canvas: canvas,
-          };
-
-          await page.render(renderContext).promise;
-
-          // 转换为 PNG Buffer
-          const imageBuffer = canvas.toBuffer('image/png');
-          const imageBase64 = imageBuffer.toString('base64');
-          const dataUri = `data:image/png;base64,${imageBase64}`;
-
-          // 使用Vision LLM识别表格
-          const messages = [
-            {
-              role: 'user' as const,
-              content: [
-                {
-                  type: 'text' as const,
-                  text: `请识别这个图片中的表格内容。
-这是一个扫描版PDF的页面，内容是一个WORD文档中的表格。
+        // 使用Vision LLM识别表格
+        const messages = [
+          {
+            role: 'user' as const,
+            content: [
+              {
+                type: 'text' as const,
+                text: `请识别这个图片中的表格内容。
+这是一个扫描版文档的页面，内容是一个表格。
 
 请提取表格中的以下信息：
 - 第3列：机构名称
@@ -273,60 +228,75 @@ export class PDFMatcher {
 2. 金额请提取数字部分，不要包含单位（亿元、万元等）
 3. 如果某个单元格为空或无法识别，请跳过该行
 4. 只返回JSON数据，不要有其他说明文字`,
+              },
+              {
+                type: 'image_url' as const,
+                image_url: {
+                  url: dataUri,
+                  detail: 'high' as const,
                 },
-                {
-                  type: 'image_url' as const,
-                  image_url: {
-                    url: dataUri,
-                    detail: 'high' as const,
-                  },
-                },
-              ],
-            },
-          ];
+              },
+            ],
+          },
+        ];
 
-          const response = await this.llmClient.invoke(messages, {
-            model: 'doubao-seed-1-6-vision-250815',
-            temperature: 0.1,
-          });
+        const response = await this.llmClient.invoke(messages, {
+          model: 'doubao-seed-1-6-vision-250815',
+          temperature: 0.1,
+        });
 
-          console.log(`第 ${pageNum} 页识别结果:`, response.content.substring(0, 200) + '...');
+        console.log(`第 ${i + 1} 张图片识别结果:`, response.content.substring(0, 200) + '...');
 
-          // 解析JSON结果
-          try {
-            let jsonStr = response.content;
-            const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-              jsonStr = jsonMatch[0];
-            }
+        // 解析JSON结果
+        try {
+          let jsonStr = response.content;
+          const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            jsonStr = jsonMatch[0];
+          }
 
-            const result = JSON.parse(jsonStr);
-            if (result.tableData && Array.isArray(result.tableData)) {
-              this.pdfData.push(...result.tableData);
-            }
-          } catch (error) {
-            console.error(`第 ${pageNum} 页JSON解析失败:`, error);
+          const result = JSON.parse(jsonStr);
+          if (result.tableData && Array.isArray(result.tableData)) {
+            this.imageData.push(...result.tableData);
           }
         } catch (error) {
-          console.error(`第 ${pageNum} 页处理失败:`, error);
+          console.error(`第 ${i + 1} 张图片JSON解析失败:`, error);
         }
+      } catch (error) {
+        console.error(`第 ${i + 1} 张图片处理失败:`, error);
       }
-    } catch (error) {
-      console.error('PDF转换错误:', error);
-      throw new Error('PDF文件转换失败，请确保PDF文件格式正确');
     }
 
-    if (this.pdfData.length === 0) {
-      throw new Error('无法从PDF中提取任何数据，请检查PDF文件内容');
+    if (this.imageData.length === 0) {
+      throw new Error('无法从图片中提取任何数据，请检查图片内容');
     }
 
-    console.log(`成功识别 ${this.pdfData.length} 个机构的数据`);
-    this.pdfData.forEach((item, index) => {
+    console.log(`成功识别 ${this.imageData.length} 个机构的数据`);
+    this.imageData.forEach((item, index) => {
       console.log(`  ${index + 1}. ${item.orgName}: ${item.creditTypes.length}个授信品种`);
       item.creditTypes.forEach(ct => {
         console.log(`     - ${ct.type}: ${ct.amount}`);
       });
     });
+  }
+
+  /**
+   * 获取 MIME 类型
+   */
+  private getMimeType(file: File | Buffer): string {
+    if (file instanceof File) {
+      if (file.type.startsWith('image/')) {
+        return file.type;
+      }
+      // 根据扩展名判断
+      const name = file.name.toLowerCase();
+      if (name.endsWith('.png')) return 'image/png';
+      if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+      if (name.endsWith('.gif')) return 'image/gif';
+      if (name.endsWith('.webp')) return 'image/webp';
+    }
+    // 默认返回 PNG
+    return 'image/png';
   }
 
   /**
@@ -336,10 +306,10 @@ export class PDFMatcher {
     console.log('\\n=== 开始匹配机构和授信品种 ===');
 
     // 初始化mapping
-    for (const pdfItem of this.pdfData) {
+    for (const imageItem of this.imageData) {
       const mapping = {
-        orgName: pdfItem.orgName,
-        creditTypes: pdfItem.creditTypes.map(ct => ({
+        orgName: imageItem.orgName,
+        creditTypes: imageItem.creditTypes.map(ct => ({
           type: ct.type,
           amount: ct.amount,
           filled: false,
@@ -520,7 +490,7 @@ export class PDFMatcher {
         orgCreditTypes.set(key, new Set());
       }
 
-      // 添加该机构在PDF中提到的授信品种列
+      // 添加该机构在图片中提到的授信品种列
       for (const ct of mapping.creditTypes) {
         if (ct.colIndex) {
           orgCreditTypes.get(key)!.add(ct.colIndex);

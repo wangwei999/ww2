@@ -14,16 +14,6 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  webpack: (config, { isServer }) => {
-    // canvas 是一个 native module，需要特殊处理
-    if (isServer) {
-      config.externals = config.externals || [];
-      if (Array.isArray(config.externals)) {
-        config.externals.push('canvas');
-      }
-    }
-    return config;
-  },
 };
 
 export default nextConfig;

@@ -1,33 +1,20 @@
 import ExcelJS from 'exceljs';
 import { LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { normalizeOrganizationName } from './data-utils';
-import * as pdfjs from 'pdfjs-dist';
-import { createCanvas } from 'canvas';
 import path from 'path';
 import fs from 'fs';
 
-// 配置 pdfjs-dist 使用 canvas 作为渲染后端
-const pdfjsLib = pdfjs as any;
-if (typeof pdfjsLib.GlobalWorkerOptions !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-}
+// 动态导入的类型
+type PDFDocument = any;
+type PDFPage = any;
+type PDFJSLib = {
+  getDocument: (options: { data: Uint8Array; useSystemFonts?: boolean }) => { promise: Promise<PDFDocument> };
+  GlobalWorkerOptions: { workerSrc: string };
+};
 
-// Node.js 环境下的 canvas factory
-class NodeCanvasFactory {
-  create(width: number, height: number) {
-    const canvas = createCanvas(width, height);
-    const context = canvas.getContext('2d');
-    return { canvas, context };
-  }
-  reset(canvasAndContext: any, width: number, height: number) {
-    canvasAndContext.canvas.width = width;
-    canvasAndContext.canvas.height = height;
-  }
-  destroy(canvasAndContext: any) {
-    canvasAndContext.canvas.width = 0;
-    canvasAndContext.canvas.height = 0;
-  }
-}
+// Canvas 相关类型
+type CanvasType = any;
+type CanvasContext = any;
 
 /**
  * PDF模式处理器
@@ -213,6 +200,11 @@ export class PDFMatcher {
     console.log('正在将PDF转换为图片...');
 
     try {
+      // 动态导入 pdfjs-dist 和 canvas（避免 Next.js webpack 兼容性问题）
+      const pdfjsLib = await import('pdfjs-dist');
+      const canvasModule = await import('canvas');
+      const createCanvas = canvasModule.createCanvas;
+
       // 使用 pdfjs-dist 加载 PDF
       const loadingTask = pdfjsLib.getDocument({
         data: new Uint8Array(pdfBuffer),
@@ -222,8 +214,6 @@ export class PDFMatcher {
       const pdfDocument = await loadingTask.promise;
       const numPages = pdfDocument.numPages;
       console.log(`PDF 共 ${numPages} 页`);
-
-      const canvasFactory = new NodeCanvasFactory();
 
       // 遍历每一页
       for (let pageNum = 1; pageNum <= Math.min(numPages, 20); pageNum++) {
@@ -235,13 +225,14 @@ export class PDFMatcher {
           const viewport = page.getViewport({ scale });
 
           // 创建 canvas
-          const { canvas, context } = canvasFactory.create(viewport.width, viewport.height);
+          const canvas = createCanvas(viewport.width, viewport.height);
+          const context = canvas.getContext('2d');
 
-          // 渲染页面
-          const renderContext = {
+          // 渲染页面（使用 any 绕过类型检查，因为 node-canvas 与 HTMLCanvasElement 类型不兼容）
+          const renderContext: any = {
             canvasContext: context,
             viewport: viewport,
-            canvasFactory: canvasFactory,
+            canvas: canvas,
           };
 
           await page.render(renderContext).promise;
@@ -316,9 +307,6 @@ export class PDFMatcher {
           } catch (error) {
             console.error(`第 ${pageNum} 页JSON解析失败:`, error);
           }
-
-          // 清理 canvas
-          canvasFactory.destroy({ canvas, context });
         } catch (error) {
           console.error(`第 ${pageNum} 页处理失败:`, error);
         }

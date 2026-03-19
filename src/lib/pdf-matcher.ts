@@ -1,9 +1,9 @@
 import ExcelJS from 'exceljs';
 import { LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { normalizeOrganizationName } from './data-utils';
-import { fromBase64 } from 'pdf2pic';
+import { execSync } from 'child_process';
+import fs, { mkdirSync, rmSync, existsSync } from 'fs';
 import path from 'path';
-import fs from 'fs';
 
 // 临时目录用于存储PDF转换的图片
 const TEMP_DIR = '/tmp/pdf-images';
@@ -11,6 +11,7 @@ const TEMP_DIR = '/tmp/pdf-images';
 /**
  * PDF模式处理器
  * 用于识别PDF中的表格数据并填充到Excel文件中
+ * 使用 pdftoppm (poppler-utils) 将 PDF 转换为图片
  */
 export class PDFMatcher {
   private pdfFile: File | Buffer;
@@ -63,7 +64,7 @@ export class PDFMatcher {
   async process(): Promise<{ workbook: ExcelJS.Workbook; statistics: any }> {
     console.log('=== 开始PDF模式处理 ===');
 
-    // 1. 加载Excel文件
+    // 1. 加载Excel文件（会自动清理共享公式）
     await this.loadExcelFile();
 
     // 2. 识别PDF表格
@@ -72,13 +73,16 @@ export class PDFMatcher {
     // 3. 匹配机构和授信品种
     this.matchOrganizationsAndCreditTypes();
 
-    // 4. 填充金额并标记红色
+    // 4. 填充金额
     this.fillAmountsWithRedMark();
 
     // 5. 删除多余的授信品种数据
     this.removeExtraCreditTypes();
 
-    // 6. 统计结果
+    // 6. 创建新的干净工作簿（避免公式问题）
+    const cleanWorkbook = await this.createCleanWorkbook();
+
+    // 7. 统计结果
     const statistics = {
       totalOrganizations: this.mappings.length,
       matchedCount: this.mappings.filter(m => m.targetRowIndex).length,
@@ -91,7 +95,7 @@ export class PDFMatcher {
     console.log('匹配失败:', statistics.unmatchedCount);
 
     return {
-      workbook: this.targetWorkbook,
+      workbook: cleanWorkbook,
       statistics,
     };
   }
@@ -128,6 +132,43 @@ export class PDFMatcher {
     if (!this.sourceSheet单体 && !this.sourceSheet集团) {
       throw new Error('Excel文件中未找到"单体"或"集团"工作表');
     }
+
+    // 加载后立即清理所有共享公式
+    this.cleanupAllSharedFormulas();
+  }
+
+  /**
+   * 清理所有共享公式
+   */
+  private cleanupAllSharedFormulas(): void {
+    console.log('\\n=== 清理所有共享公式 ===');
+
+    this.targetWorkbook.eachSheet((worksheet, sheetId) => {
+      let cleanedCount = 0;
+      worksheet.eachRow((row, rowNumber) => {
+        row.eachCell((cell, colNumber) => {
+          try {
+            const cellData = cell as any;
+            if (cellData.sharedFormula) {
+              const result = cellData.result;
+              if (result !== undefined && result !== null) {
+                cell.value = result;
+              } else {
+                cell.value = null;
+              }
+              cleanedCount++;
+            }
+          } catch (e) {
+            // 忽略错误
+          }
+        });
+      });
+      if (cleanedCount > 0) {
+        console.log(`  工作表 "${worksheet.name}" 清理了 ${cleanedCount} 个共享公式`);
+      }
+    });
+
+    console.log('共享公式清理完成');
   }
 
   /**
@@ -136,93 +177,67 @@ export class PDFMatcher {
   private async recognizePDFTable(): Promise<void> {
     console.log('识别PDF表格...');
 
-    // 确保临时目录存在
-    if (!fs.existsSync(TEMP_DIR)) {
-      fs.mkdirSync(TEMP_DIR, { recursive: true });
-    }
-
-    // 将PDF转换为Base64
-    let pdfBase64: string;
-
+    // 将PDF转换为Buffer并保存为临时文件
+    let pdfBuffer: Buffer;
     if (this.pdfFile instanceof File) {
       const arrayBuffer = await this.pdfFile.arrayBuffer();
-      pdfBase64 = Buffer.from(arrayBuffer).toString('base64');
+      pdfBuffer = Buffer.from(arrayBuffer);
     } else {
-      pdfBase64 = this.pdfFile.toString('base64');
+      pdfBuffer = this.pdfFile;
     }
 
-    // 配置pdf2pic选项
-    const options = {
-      density: 200,           // 高密度以获得清晰的图片
-      saveFilename: 'page',
-      savePath: TEMP_DIR,
-      format: 'png',
-      width: 2000,
-      height: 2000,
-    };
+    // 创建临时目录
+    const sessionId = Date.now();
+    const sessionDir = `${TEMP_DIR}/${sessionId}`;
+    if (!existsSync(TEMP_DIR)) {
+      mkdirSync(TEMP_DIR, { recursive: true });
+    }
+    mkdirSync(sessionDir, { recursive: true });
 
-    // 创建转换器
-    const convert = fromBase64(pdfBase64, options);
+    // 保存PDF文件
+    const pdfPath = `${sessionDir}/input.pdf`;
+    fs.writeFileSync(pdfPath, pdfBuffer);
 
     console.log('正在将PDF转换为图片...');
 
-    // 获取PDF总页数并转换所有页面
-    const pages: string[] = [];
-    let pageNum = 1;
-
     try {
-      // 尝试转换多页PDF
-      while (true) {
-        try {
-          const result = await convert(pageNum, { responseType: 'image' });
-          if (result && result.path) {
-            console.log(`成功转换第 ${pageNum} 页: ${result.path}`);
-            pages.push(result.path);
-            pageNum++;
-          } else {
-            break;
-          }
-        } catch (e) {
-          // 如果转换失败，说明已经到达最后一页
-          if (pageNum === 1) {
-            // 如果第一页就失败，尝试不指定页码
-            const result = await convert(1, { responseType: 'image' });
-            if (result && result.path) {
-              pages.push(result.path);
-            }
-          }
-          break;
-        }
+      // 使用 pdftoppm 将 PDF 转换为 PNG 图片
+      const outputPrefix = `${sessionDir}/page`;
+      execSync(`pdftoppm -png -r 200 "${pdfPath}" "${outputPrefix}"`, {
+        timeout: 60000, // 60秒超时
+      });
 
-        // 最多处理20页
-        if (pageNum > 20) break;
+      // 获取生成的图片文件列表
+      const imageFiles = fs.readdirSync(sessionDir)
+        .filter(f => f.endsWith('.png'))
+        .sort()
+        .map(f => `${sessionDir}/${f}`);
+
+      console.log(`共转换 ${imageFiles.length} 页PDF`);
+
+      if (imageFiles.length === 0) {
+        throw new Error('无法从PDF中提取页面');
       }
-    } catch (error) {
-      console.error('PDF转换错误:', error);
-      throw new Error('PDF文件转换失败，请确保PDF文件格式正确');
-    }
 
-    if (pages.length === 0) {
-      throw new Error('无法从PDF中提取页面');
-    }
+      // 对每一页进行OCR识别
+      for (let i = 0; i < imageFiles.length; i++) {
+        const imagePath = imageFiles[i];
+        const pageNum = i + 1;
+        console.log(`正在处理第 ${pageNum} 页...`);
 
-    console.log(`共转换 ${pages.length} 页PDF`);
+        try {
+          const imageBuffer = fs.readFileSync(imagePath);
+          const imageBase64 = imageBuffer.toString('base64');
+          const dataUri = `data:image/png;base64,${imageBase64}`;
 
-    // 对每一页进行OCR识别
-    for (const imagePath of pages) {
-      try {
-        const imageBuffer = fs.readFileSync(imagePath);
-        const imageBase64 = imageBuffer.toString('base64');
-        const dataUri = `data:image/png;base64,${imageBase64}`;
-
-        // 使用Vision LLM识别表格
-        const messages = [
-          {
-            role: 'user' as const,
-            content: [
-              {
-                type: 'text' as const,
-                text: `请识别这个图片中的表格内容。
+          // 使用Vision LLM识别表格
+          const messages = [
+            {
+              role: 'user' as const,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: `请识别这个图片中的表格内容。
 这是一个扫描版PDF的页面，内容是一个WORD文档中的表格。
 
 请提取表格中的以下信息：
@@ -246,48 +261,65 @@ export class PDFMatcher {
 2. 金额请提取数字部分，不要包含单位（亿元、万元等）
 3. 如果某个单元格为空或无法识别，请跳过该行
 4. 只返回JSON数据，不要有其他说明文字`,
-              },
-              {
-                type: 'image_url' as const,
-                image_url: {
-                  url: dataUri,
-                  detail: 'high' as const,
                 },
-              },
-            ],
-          },
-        ];
+                {
+                  type: 'image_url' as const,
+                  image_url: {
+                    url: dataUri,
+                    detail: 'high' as const,
+                  },
+                },
+              ],
+            },
+          ];
 
-        const response = await this.llmClient.invoke(messages, {
-          model: 'doubao-seed-1-6-vision-250815',
-          temperature: 0.1,
-        });
+          const response = await this.llmClient.invoke(messages, {
+            model: 'doubao-seed-1-6-vision-250815',
+            temperature: 0.1,
+          });
 
-        console.log(`第 ${pages.indexOf(imagePath) + 1} 页识别结果:`, response.content.substring(0, 200) + '...');
+          console.log(`第 ${pageNum} 页识别结果:`, response.content.substring(0, 200) + '...');
 
-        // 解析JSON结果
-        try {
-          let jsonStr = response.content;
-          const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            jsonStr = jsonMatch[0];
-          }
+          // 解析JSON结果
+          try {
+            let jsonStr = response.content;
+            const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              jsonStr = jsonMatch[0];
+            }
 
-          const result = JSON.parse(jsonStr);
-          if (result.tableData && Array.isArray(result.tableData)) {
-            this.pdfData.push(...result.tableData);
+            const result = JSON.parse(jsonStr);
+            if (result.tableData && Array.isArray(result.tableData)) {
+              this.pdfData.push(...result.tableData);
+            }
+          } catch (error) {
+            console.error(`第 ${pageNum} 页JSON解析失败:`, error);
           }
         } catch (error) {
-          console.error(`第 ${pages.indexOf(imagePath) + 1} 页JSON解析失败:`, error);
-        }
-      } finally {
-        // 清理临时文件
-        try {
-          fs.unlinkSync(imagePath);
-        } catch (e) {
-          // 忽略清理错误
+          console.error(`第 ${pageNum} 页处理失败:`, error);
         }
       }
+
+      // 清理临时文件
+      try {
+        rmSync(sessionDir, { recursive: true, force: true });
+      } catch (e) {
+        console.warn('清理临时文件失败:', e);
+      }
+
+    } catch (error) {
+      // 清理临时文件
+      try {
+        rmSync(sessionDir, { recursive: true, force: true });
+      } catch (e) {
+        // 忽略清理错误
+      }
+      console.error('PDF转换错误:', error);
+      throw new Error('PDF文件转换失败，请确保PDF文件格式正确');
+    }
+
+    if (this.pdfData.length === 0) {
+      throw new Error('无法从PDF中提取任何数据，请检查PDF文件内容');
     }
 
     console.log(`成功识别 ${this.pdfData.length} 个机构的数据`);
@@ -297,10 +329,6 @@ export class PDFMatcher {
         console.log(`     - ${ct.type}: ${ct.amount}`);
       });
     });
-
-    if (this.pdfData.length === 0) {
-      throw new Error('PDF表格识别结果为空，请检查PDF文件内容');
-    }
   }
 
   /**
@@ -333,7 +361,7 @@ export class PDFMatcher {
           this.sourceSheet单体,
           normalizedOrgName,
           '单体',
-          'B' // 单体表机构在B列
+          'B'
         );
         if (result) {
           mapping.matchedOrgName = result.orgName;
@@ -350,7 +378,7 @@ export class PDFMatcher {
           this.sourceSheet集团,
           normalizedOrgName,
           '集团',
-          'D' // 集团表机构在D列
+          'D'
         );
         if (result) {
           mapping.matchedOrgName = result.orgName;
@@ -406,15 +434,10 @@ export class PDFMatcher {
   /**
    * 匹配授信品种列
    */
-  private matchCreditTypeColumns(
-    mapping: any,
-    sheet: ExcelJS.Worksheet
-  ): void {
-    // 获取第3行的授信品种字段名
+  private matchCreditTypeColumns(mapping: any, sheet: ExcelJS.Worksheet): void {
     const headerRow = sheet.getRow(3);
     const creditTypeMap = new Map<string, number>();
 
-    // 从E列开始遍历（列索引5）
     for (let col = 5; col <= 50; col++) {
       const cell = headerRow.getCell(col);
       const value = String(cell.value || '').trim();
@@ -425,14 +448,11 @@ export class PDFMatcher {
 
     console.log(`  工作表中的授信品种:`, Array.from(creditTypeMap.keys()));
 
-    // 匹配每个授信品种
     for (const ct of mapping.creditTypes) {
-      // 尝试精确匹配
       if (creditTypeMap.has(ct.type)) {
         ct.colIndex = creditTypeMap.get(ct.type);
         console.log(`    授信品种匹配成功: ${ct.type} -> 列${ct.colIndex}`);
       } else {
-        // 尝试模糊匹配
         for (const [header, colIndex] of creditTypeMap.entries()) {
           if (header.includes(ct.type) || ct.type.includes(header)) {
             ct.colIndex = colIndex;
@@ -449,7 +469,7 @@ export class PDFMatcher {
   }
 
   /**
-   * 填充金额并标记红色
+   * 填充金额
    */
   private fillAmountsWithRedMark(): void {
     console.log('\\n=== 开始填充金额 ===');
@@ -466,47 +486,12 @@ export class PDFMatcher {
         if (!ct.colIndex) continue;
 
         const cell = sheet.getCell(mapping.targetRowIndex, ct.colIndex);
+        const oldValue = cell.value;
         
-        // 获取原值（处理公式单元格的情况）
-        let oldNumericValue: number | null = null;
-        try {
-          const cellData = cell as any;
-          // 如果是公式单元格，取result值
-          if (cellData.result !== undefined && cellData.result !== null) {
-            oldNumericValue = Number(cellData.result);
-          } else if (cell.value !== null && cell.value !== undefined) {
-            oldNumericValue = Number(cell.value);
-          }
-        } catch (e) {
-          oldNumericValue = null;
-        }
-
-        const newNumericValue = ct.amount;
-        
-        // 判断是否有变动（只有变动时才标记红色）
-        const hasChange = (
-          // 情况1: 原值为空或无效，新值有值
-          (oldNumericValue === null || isNaN(oldNumericValue)) && !isNaN(newNumericValue) ||
-          // 情况2: 原值和新值不同
-          (oldNumericValue !== null && !isNaN(oldNumericValue) && oldNumericValue !== newNumericValue)
-        );
-
-        // 填充新金额
-        cell.value = newNumericValue;
-
-        // 只有有变动时才设置红色字体
-        if (hasChange) {
-          cell.font = {
-            color: { argb: 'FFFF0000' },
-            bold: true,
-          };
-          console.log(`  ${ct.type} (列${ct.colIndex}): ${oldNumericValue ?? '(空)'} -> ${newNumericValue} [红色标记]`);
-        } else {
-          // 没有变动，保持原字体样式
-          console.log(`  ${ct.type} (列${ct.colIndex}): ${newNumericValue} (无变动)`);
-        }
+        cell.value = ct.amount;
 
         ct.filled = true;
+        console.log(`  ${ct.type} (列${ct.colIndex}): ${oldValue ?? '(空)'} -> ${ct.amount}`);
       }
     }
   }
@@ -517,7 +502,6 @@ export class PDFMatcher {
   private removeExtraCreditTypes(): void {
     console.log('\\n=== 开始删除多余的授信品种数据 ===');
 
-    // 收集每个机构应该保留的授信品种列
     const orgCreditTypes = new Map<string, Set<number>>();
 
     for (const mapping of this.mappings) {
@@ -528,7 +512,6 @@ export class PDFMatcher {
         orgCreditTypes.set(key, new Set());
       }
 
-      // 添加该机构在PDF中提到的授信品种列
       for (const ct of mapping.creditTypes) {
         if (ct.colIndex) {
           orgCreditTypes.get(key)!.add(ct.colIndex);
@@ -536,7 +519,6 @@ export class PDFMatcher {
       }
     }
 
-    // 删除多余的授信品种数据
     for (const mapping of this.mappings) {
       if (!mapping.targetRowIndex || !mapping.sourceSheet) continue;
 
@@ -546,30 +528,136 @@ export class PDFMatcher {
       const key = `${mapping.sourceSheet}-${mapping.targetRowIndex}`;
       const allowedCols = orgCreditTypes.get(key);
 
-      // 遍历该行的所有授信品种列（从E列开始）
       for (let col = 5; col <= 50; col++) {
         const cell = sheet.getCell(mapping.targetRowIndex, col);
         
-        // 如果该列有值，但不在允许列表中，则删除
         if (cell.value !== null && cell.value !== undefined && 
             allowedCols && !allowedCols.has(col)) {
           const oldValue = cell.value;
-          
-          // 检查是否包含公式
-          try {
-            const cellData = cell as any;
-            if (cellData.formula || cellData.sharedFormula) {
-              console.log(`  删除多余数据(含公式): ${mapping.orgName} 列${col}`);
-            }
-          } catch (e) {
-            // 忽略错误
-          }
-          
-          // 直接赋值null会自动清除公式
           cell.value = null;
           console.log(`  删除多余数据: ${mapping.orgName} 列${col} (${oldValue})`);
         }
       }
     }
+  }
+
+  /**
+   * 创建干净的工作簿（保留样式和公式）
+   */
+  private async createCleanWorkbook(): Promise<ExcelJS.Workbook> {
+    console.log('\\n=== 创建干净的工作簿 ===');
+
+    const newWorkbook = new ExcelJS.Workbook();
+
+    this.targetWorkbook.eachSheet((sourceSheet, sheetId) => {
+      const newSheet = newWorkbook.addWorksheet(sourceSheet.name);
+
+      sourceSheet.columns.forEach((col, index) => {
+        if (col.width) {
+          newSheet.getColumn(index + 1).width = col.width;
+        }
+      });
+
+      const maxRow = sourceSheet.rowCount || 200;
+      const maxCol = sourceSheet.columnCount || 50;
+
+      for (let rowNumber = 1; rowNumber <= maxRow; rowNumber++) {
+        const sourceRow = sourceSheet.getRow(rowNumber);
+        const newRow = newSheet.getRow(rowNumber);
+        newRow.height = sourceRow.height;
+
+        for (let colNumber = 1; colNumber <= maxCol; colNumber++) {
+          const sourceCell = sourceRow.getCell(colNumber);
+          const newCell = newRow.getCell(colNumber);
+
+          try {
+            const cellData = sourceCell as any;
+            
+            let hasFormula = false;
+            let hasSharedFormula = false;
+            let formulaValue = null;
+            let sharedFormulaValue = null;
+            let resultValue = null;
+
+            try {
+              if (cellData.formula) {
+                hasFormula = true;
+                formulaValue = cellData.formula;
+              }
+            } catch (e) {}
+
+            try {
+              if (cellData.sharedFormula) {
+                hasSharedFormula = true;
+                sharedFormulaValue = cellData.sharedFormula;
+                resultValue = cellData.result;
+              }
+            } catch (e) {}
+
+            if (hasFormula && formulaValue) {
+              newCell.value = { formula: formulaValue };
+            } else if (hasSharedFormula && sharedFormulaValue) {
+              if (resultValue !== undefined && resultValue !== null) {
+                newCell.value = { 
+                  sharedFormula: sharedFormulaValue, 
+                  result: resultValue 
+                };
+              } else {
+                newCell.value = { sharedFormula: sharedFormulaValue };
+              }
+            } else {
+              newCell.value = sourceCell.value;
+            }
+          } catch (e) {
+            newCell.value = sourceCell.value;
+          }
+
+          try {
+            if (sourceCell.style) {
+              const styleModel = (sourceCell as any).model;
+              if (styleModel && styleModel.style) {
+                newCell.style = { ...styleModel.style };
+              } else {
+                newCell.style = JSON.parse(JSON.stringify(sourceCell.style));
+              }
+            }
+            if (sourceCell.font) {
+              newCell.font = JSON.parse(JSON.stringify(sourceCell.font));
+            }
+            if (sourceCell.fill) {
+              newCell.fill = JSON.parse(JSON.stringify(sourceCell.fill));
+            }
+            if (sourceCell.border) {
+              newCell.border = JSON.parse(JSON.stringify(sourceCell.border));
+            } else {
+              const firstDataCell = sourceRow.getCell(1);
+              if (firstDataCell && firstDataCell.border) {
+                newCell.border = JSON.parse(JSON.stringify(firstDataCell.border));
+              }
+            }
+            if (sourceCell.alignment) {
+              newCell.alignment = JSON.parse(JSON.stringify(sourceCell.alignment));
+            }
+            if (sourceCell.numFmt) {
+              newCell.numFmt = sourceCell.numFmt;
+            }
+          } catch (e) {}
+        }
+      }
+
+      const merges = (sourceSheet as any)._merges;
+      if (merges) {
+        Object.values(merges).forEach((merge: any) => {
+          try {
+            newSheet.mergeCells(merge);
+          } catch (e) {}
+        });
+      }
+
+      console.log(`  复制工作表: ${sourceSheet.name}`);
+    });
+
+    console.log('干净工作簿创建完成');
+    return newWorkbook;
   }
 }

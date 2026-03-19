@@ -542,7 +542,7 @@ export class PDFMatcher {
   }
 
   /**
-   * 创建干净的工作簿（保留样式和公式）
+   * 创建干净的工作簿（保留样式，不复制共享公式）
    */
   private async createCleanWorkbook(): Promise<ExcelJS.Workbook> {
     console.log('\\n=== 创建干净的工作簿 ===');
@@ -573,46 +573,44 @@ export class PDFMatcher {
           try {
             const cellData = sourceCell as any;
             
+            // 检查是否有普通公式
             let hasFormula = false;
-            let hasSharedFormula = false;
             let formulaValue = null;
-            let sharedFormulaValue = null;
-            let resultValue = null;
-
+            
             try {
-              if (cellData.formula) {
+              if (cellData.formula && !cellData.sharedFormula) {
                 hasFormula = true;
                 formulaValue = cellData.formula;
               }
             } catch (e) {}
 
-            try {
-              if (cellData.sharedFormula) {
-                hasSharedFormula = true;
-                sharedFormulaValue = cellData.sharedFormula;
-                resultValue = cellData.result;
-              }
-            } catch (e) {}
-
             if (hasFormula && formulaValue) {
+              // 只复制普通公式，不复制共享公式
               newCell.value = { formula: formulaValue };
-            } else if (hasSharedFormula && sharedFormulaValue) {
-              if (resultValue !== undefined && resultValue !== null) {
-                newCell.value = { 
-                  sharedFormula: sharedFormulaValue, 
-                  result: resultValue 
-                };
-              } else {
-                newCell.value = { sharedFormula: sharedFormulaValue };
-              }
             } else {
-              newCell.value = sourceCell.value;
+              // 对于共享公式或普通单元格，直接使用值（不复制公式）
+              // 这样可以避免"Shared Formula master must exist above and or left of clone"错误
+              let cellValue = sourceCell.value;
+              
+              // 如果是共享公式，尝试获取结果值
+              if (cellData.sharedFormula) {
+                try {
+                  const result = cellData.result;
+                  if (result !== undefined && result !== null) {
+                    cellValue = result;
+                  }
+                } catch (e) {}
+              }
+              
+              newCell.value = cellValue;
             }
           } catch (e) {
+            // 如果出现任何错误，直接复制值
             newCell.value = sourceCell.value;
           }
 
           try {
+            // 复制样式
             if (sourceCell.style) {
               const styleModel = (sourceCell as any).model;
               if (styleModel && styleModel.style) {
@@ -645,6 +643,7 @@ export class PDFMatcher {
         }
       }
 
+      // 复制合并单元格
       const merges = (sourceSheet as any)._merges;
       if (merges) {
         Object.values(merges).forEach((merge: any) => {

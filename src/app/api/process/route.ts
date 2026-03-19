@@ -355,9 +355,9 @@ export async function POST(request: NextRequest) {
     let allMatchResults: any[] = [];
     let statistics: any = {};
     
-    // 授信模式处理
+    // A类授信调整处理
     if (isSpecialMode) {
-      console.log('=== 启用授信模式匹配（使用exceljs）===');
+      console.log('=== 启用A类授信调整匹配（使用exceljs）===');
       
       // 保存上传的文件到临时位置
       const tempDir = path.join(process.cwd(), 'temp');
@@ -384,7 +384,7 @@ export async function POST(request: NextRequest) {
       console.log('源文件工作表:', workbookA.worksheets.map(ws => ws.name));
       console.log('目标文件工作表:', workbookB.worksheets.map(ws => ws.name));
       
-      // 创建授信模式匹配器
+      // 创建A类授信调整匹配器
       const creditMatcher = new CreditMatcher(workbookA, workbookB);
       
       // 执行匹配并直接修改B文件workbook
@@ -395,12 +395,12 @@ export async function POST(request: NextRequest) {
         totalFilled: stats.matchedCount,
         convertedCount: 0,
         fillRate: stats.totalOrganizations > 0 ? (stats.matchedCount / stats.totalOrganizations) * 100 : 0,
-        mode: '授信模式',
+        mode: 'A类授信调整',
         matchedCount: stats.matchedCount,
         unmatchedCount: stats.unmatchedCount,
       };
       
-      console.log('授信模式匹配完成:', statistics);
+      console.log('A类授信调整匹配完成:', statistics);
       
       // 清理临时文件
       try {
@@ -411,8 +411,8 @@ export async function POST(request: NextRequest) {
         console.error('清理临时文件失败:', e);
       }
     } else {
-      // 常规模式处理
-      console.log('=== 启用常规模式匹配 ===');
+      // 对外提供数据处理
+      console.log('=== 启用对外提供数据匹配 ===');
       
       // 批量匹配
       // 根据需求：如果文件B包含"单位：万元 %"字样，则保持原始格式（不进行单位转换和百分比格式化）
@@ -500,18 +500,18 @@ export async function POST(request: NextRequest) {
         totalFilled,
         convertedCount: totalConverted,
         fillRate: filledTable.rows.length > 0 ? (totalFilled / (filledTable.rows.length * (filledTable.headers.length - 1))) * 100 : 0,
-        mode: '常规模式',
+        mode: '对外提供数据',
       };
     }
     
     // 验证数据
     if (isSpecialMode) {
       if (!filledWorkbook) {
-        throw new Error('授信模式：没有可保存的workbook');
+        throw new Error('A类授信调整：没有可保存的workbook');
       }
     } else {
       if (!filledTable) {
-        throw new Error('常规模式：没有可保存的表格数据');
+        throw new Error('对外提供数据：没有可保存的表格数据');
       }
     }
     
@@ -542,17 +542,17 @@ export async function POST(request: NextRequest) {
     let savedFilename: string;
     
     if (isSpecialMode) {
-      // 授信模式：直接保存workbook，保留原始格式
+      // A类授信调整：直接保存workbook，保留原始格式
       if (!filledWorkbook) {
-        throw new Error('授信模式：没有可保存的workbook');
+        throw new Error('A类授信调整：没有可保存的workbook');
       }
       savedFilename = await saveWorkbook(filledWorkbook, fileId);
-      console.log('授信模式：已保存workbook（保留原始格式）');
+      console.log('A类授信调整：已保存workbook（保留原始格式）');
     } else {
-      // 常规模式：使用saveAsExcel
+      // 对外提供数据：使用saveAsExcel
       const keepOriginalFormat = parseResultB.keepOriginalFormat || false;
       savedFilename = saveAsExcel([filledTable], fileId, allMatchResults, keepOriginalFormat);
-      console.log('常规模式：已保存表格');
+      console.log('对外提供数据：已保存表格');
     }
     
     console.log('文件保存成功:', savedFilename);
@@ -560,8 +560,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ 
       success: true, 
       fileId: savedFilename,
-      message: isSpecialMode ? '授信模式处理完成（保留原始格式）' : '处理完成',
-      mode: isSpecialMode ? '授信模式' : '常规模式',
+      message: isSpecialMode ? 'A类授信调整处理完成（保留原始格式）' : '处理完成',
+      mode: isSpecialMode ? 'A类授信调整' : '对外提供数据',
       outputFormat: 'xlsx',  // 明确说明输出格式
       originalFormat: fileB.name.split('.').pop(),  // 原始格式
       statistics

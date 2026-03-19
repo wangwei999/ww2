@@ -138,8 +138,8 @@ export default function Home() {
 
   const handleProcess = async () => {
     if (mode === 'pdf') {
-      // PDF模式处理
-      console.log('PDF模式处理 - pdfFile:', pdfFile?.name, 'excelFile:', excelFile?.name);
+      // 授信写入处理
+      console.log('授信写入处理 - pdfFile:', pdfFile?.name, 'excelFile:', excelFile?.name);
       
       if (!pdfFile || !excelFile) {
         toast.error('请上传PDF文件和Excel文件');
@@ -182,7 +182,7 @@ export default function Home() {
         link.click();
         window.URL.revokeObjectURL(url);
         
-        toast.success('PDF处理完成，文件已下载！');
+        toast.success('授信写入完成，文件已下载！');
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : '处理失败，请重试';
         toast.error(errorMessage);
@@ -193,7 +193,7 @@ export default function Home() {
       return;
     }
 
-    // 常规模式/授信模式处理
+    // 对外提供数据/A类授信调整处理
     console.log('开始处理 - fileA:', fileA?.name, 'fileB:', fileB?.name);
     
     if (!fileA || !fileB) {
@@ -332,7 +332,7 @@ export default function Home() {
     return !fileA || !fileB;
   };
 
-  // 获取下载按钮是否禁用（PDF模式直接下载，不需要下载按钮）
+  // 获取下载按钮是否禁用（授信写入模式直接下载，不需要下载按钮）
   const isDownloadDisabled = () => {
     if (mode === 'pdf') return true;
     return downloading || !hasProcessedFile;
@@ -364,7 +364,7 @@ export default function Home() {
               <div className="flex items-center space-x-2 p-4 border rounded-lg hover:bg-muted/50 cursor-pointer">
                 <RadioGroupItem value="normal" id="normal" />
                 <div className="flex-1">
-                  <Label htmlFor="normal" className="font-medium cursor-pointer">常规模式</Label>
+                  <Label htmlFor="normal" className="font-medium cursor-pointer">对外提供数据</Label>
                   <p className="text-xs text-muted-foreground mt-1">
                     自动识别表格结构，智能匹配字段
                   </p>
@@ -373,7 +373,7 @@ export default function Home() {
               <div className="flex items-center space-x-2 p-4 border rounded-lg hover:bg-muted/50 cursor-pointer">
                 <RadioGroupItem value="credit" id="credit" />
                 <div className="flex-1">
-                  <Label htmlFor="credit" className="font-medium cursor-pointer">授信模式</Label>
+                  <Label htmlFor="credit" className="font-medium cursor-pointer">A类授信调整</Label>
                   <p className="text-xs text-muted-foreground mt-1">
                     基于机构名称匹配，支持单体/集团表
                   </p>
@@ -382,7 +382,7 @@ export default function Home() {
               <div className="flex items-center space-x-2 p-4 border rounded-lg hover:bg-muted/50 cursor-pointer">
                 <RadioGroupItem value="pdf" id="pdf" />
                 <div className="flex-1">
-                  <Label htmlFor="pdf" className="font-medium cursor-pointer">PDF模式</Label>
+                  <Label htmlFor="pdf" className="font-medium cursor-pointer">授信写入</Label>
                   <p className="text-xs text-muted-foreground mt-1">
                     识别扫描PDF表格，自动填充金额
                   </p>
@@ -395,7 +395,7 @@ export default function Home() {
         {/* 功能说明 */}
         <Card className="p-6 bg-muted/50">
           <h3 className="font-semibold mb-3">
-            {mode === 'pdf' ? 'PDF模式功能' : '支持的功能'}
+            {mode === 'pdf' ? '授信写入功能' : '支持的功能'}
           </h3>
           {mode === 'pdf' ? (
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">

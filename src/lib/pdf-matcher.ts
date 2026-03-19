@@ -1,9 +1,33 @@
 import ExcelJS from 'exceljs';
 import { LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { normalizeOrganizationName } from './data-utils';
-import { pdf } from 'pdf-to-img';
+import * as pdfjs from 'pdfjs-dist';
+import { createCanvas } from 'canvas';
 import path from 'path';
 import fs from 'fs';
+
+// 配置 pdfjs-dist 使用 canvas 作为渲染后端
+const pdfjsLib = pdfjs as any;
+if (typeof pdfjsLib.GlobalWorkerOptions !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+}
+
+// Node.js 环境下的 canvas factory
+class NodeCanvasFactory {
+  create(width: number, height: number) {
+    const canvas = createCanvas(width, height);
+    const context = canvas.getContext('2d');
+    return { canvas, context };
+  }
+  reset(canvasAndContext: any, width: number, height: number) {
+    canvasAndContext.canvas.width = width;
+    canvasAndContext.canvas.height = height;
+  }
+  destroy(canvasAndContext: any) {
+    canvasAndContext.canvas.width = 0;
+    canvasAndContext.canvas.height = 0;
+  }
+}
 
 /**
  * PDF模式处理器
@@ -188,27 +212,43 @@ export class PDFMatcher {
 
     console.log('正在将PDF转换为图片...');
 
-    let pageNum = 0;
-
     try {
-      // 使用 pdf-to-img 转换 PDF（基于 pdf.js，不依赖外部工具）
-      const pages = await pdf(pdfBuffer, { 
-        scale: 2, // 高分辨率以获得清晰的图片
+      // 使用 pdfjs-dist 加载 PDF
+      const loadingTask = pdfjsLib.getDocument({
+        data: new Uint8Array(pdfBuffer),
+        useSystemFonts: true,
       });
 
-      // 遍历每一页并识别
-      for await (const pageBuffer of pages) {
-        pageNum++;
+      const pdfDocument = await loadingTask.promise;
+      const numPages = pdfDocument.numPages;
+      console.log(`PDF 共 ${numPages} 页`);
+
+      const canvasFactory = new NodeCanvasFactory();
+
+      // 遍历每一页
+      for (let pageNum = 1; pageNum <= Math.min(numPages, 20); pageNum++) {
         console.log(`正在处理第 ${pageNum} 页...`);
 
-        // 最多处理20页
-        if (pageNum > 20) {
-          console.log('已达到最大页数限制(20页)，停止处理');
-          break;
-        }
-
         try {
-          const imageBase64 = pageBuffer.toString('base64');
+          const page = await pdfDocument.getPage(pageNum);
+          const scale = 2; // 高分辨率
+          const viewport = page.getViewport({ scale });
+
+          // 创建 canvas
+          const { canvas, context } = canvasFactory.create(viewport.width, viewport.height);
+
+          // 渲染页面
+          const renderContext = {
+            canvasContext: context,
+            viewport: viewport,
+            canvasFactory: canvasFactory,
+          };
+
+          await page.render(renderContext).promise;
+
+          // 转换为 PNG Buffer
+          const imageBuffer = canvas.toBuffer('image/png');
+          const imageBase64 = imageBuffer.toString('base64');
           const dataUri = `data:image/png;base64,${imageBase64}`;
 
           // 使用Vision LLM识别表格
@@ -276,6 +316,9 @@ export class PDFMatcher {
           } catch (error) {
             console.error(`第 ${pageNum} 页JSON解析失败:`, error);
           }
+
+          // 清理 canvas
+          canvasFactory.destroy({ canvas, context });
         } catch (error) {
           console.error(`第 ${pageNum} 页处理失败:`, error);
         }
@@ -289,7 +332,6 @@ export class PDFMatcher {
       throw new Error('无法从PDF中提取任何数据，请检查PDF文件内容');
     }
 
-    console.log(`共处理 ${pageNum} 页PDF`);
     console.log(`成功识别 ${this.pdfData.length} 个机构的数据`);
     this.pdfData.forEach((item, index) => {
       console.log(`  ${index + 1}. ${item.orgName}: ${item.creditTypes.length}个授信品种`);
@@ -297,10 +339,6 @@ export class PDFMatcher {
         console.log(`     - ${ct.type}: ${ct.amount}`);
       });
     });
-
-    if (this.pdfData.length === 0) {
-      throw new Error('PDF表格识别结果为空，请检查PDF文件内容');
-    }
   }
 
   /**

@@ -322,7 +322,7 @@ export default function Home() {
     return !fileA || !fileB;
   };
 
-  // 获取下载按钮是否禁用
+  // 获取下载按钮是否禁用（PDF模式直接下载，不需要下载按钮）
   const isDownloadDisabled = () => {
     if (mode === 'pdf') return true;
     return downloading || !hasProcessedFile;
@@ -392,9 +392,9 @@ export default function Home() {
               <li>✓ OCR识别扫描版PDF表格</li>
               <li>✓ 自动提取机构名称和授信品种</li>
               <li>✓ 智能匹配单体表和集团表</li>
-              <li>✓ 自动填充金额</li>
+              <li>✓ 自动填充金额并标记红色</li>
               <li>✓ 删除多余的授信品种数据</li>
-              <li>✓ 支持多页PDF处理</li>
+              <li>✓ 修改内容用红色字体显示</li>
             </ul>
           ) : (
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
@@ -484,6 +484,7 @@ export default function Home() {
                   <li>文件B必须包含"单体"或"集团"工作表</li>
                   <li>单体表机构字段在B列，授信品种在第3行</li>
                   <li>集团表机构字段在D列，授信品种在第3行</li>
+                  <li>修改的内容会用红色字体标记</li>
                 </ul>
               ) : (
                 <ul className="text-amber-800 dark:text-amber-300/80 space-y-1 list-disc list-inside">

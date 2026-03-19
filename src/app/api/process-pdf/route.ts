@@ -128,8 +128,27 @@ function extractWorkbookData(workbook: ExcelJS.Workbook): SheetData[] {
           const model = (cell as any).model;
           
           if (model) {
-            // 获取值（如果有公式，使用公式的值）
-            cellData.value = model.value;
+            // 获取值 - 处理公式单元格和普通单元格
+            let value = model.value;
+            
+            // 如果value是对象，可能包含公式和结果
+            if (value && typeof value === 'object') {
+              // 如果有result属性，使用result
+              if ('result' in value && (value as any).result !== undefined && (value as any).result !== null) {
+                value = (value as any).result;
+              }
+              // 如果value有sharedFormula，也尝试获取result
+              else if ('sharedFormula' in value && model.result !== undefined) {
+                value = model.result;
+              }
+            }
+            
+            // 如果model直接有result属性，优先使用
+            if (model.result !== undefined && model.result !== null) {
+              value = model.result;
+            }
+            
+            cellData.value = value;
             
             // 获取样式
             if (model.style) {
@@ -145,7 +164,15 @@ function extractWorkbookData(workbook: ExcelJS.Workbook): SheetData[] {
         } catch (e) {
           // 备选方案
           try {
-            cellData.value = cell.value;
+            const cellObj = cell as any;
+            let value = cell.value;
+            
+            // 如果value是对象，提取result
+            if (value && typeof value === 'object' && 'result' in value) {
+              value = (value as any).result;
+            }
+            
+            cellData.value = value;
           } catch (e2) {}
         }
 

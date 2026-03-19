@@ -562,6 +562,7 @@ export class PDFMatcher {
 
   /**
    * 删除多余的授信品种数据
+   * 注意：保护汇总列（单体表D列-第4列，集团表E列-第5列）
    */
   private removeExtraCreditTypes(): void {
     console.log('\\n=== 开始删除多余的授信品种数据 ===');
@@ -592,7 +593,18 @@ export class PDFMatcher {
       const key = `${mapping.sourceSheet}-${mapping.targetRowIndex}`;
       const allowedCols = orgCreditTypes.get(key);
 
+      // 确定汇总列的位置
+      // 单体表：D列（第4列）是汇总列
+      // 集团表：E列（第5列）是汇总列
+      const summaryCol = mapping.sourceSheet === '单体' ? 4 : 5;
+
+      // 从授信品种列开始（跳过汇总列）
       for (let col = 5; col <= 50; col++) {
+        // 跳过汇总列
+        if (col === summaryCol) {
+          continue;
+        }
+
         const cell = sheet.getCell(mapping.targetRowIndex, col);
         
         if (cell.value !== null && cell.value !== undefined && 
@@ -640,9 +652,30 @@ export class PDFMatcher {
           let cellValue: any = null;
           try {
             const cellData = sourceCell as any;
+            const model = cellData.model;
             
-            // 如果有公式，使用结果值
-            if (cellData.sharedFormula || cellData.formula) {
+            // 优先级：
+            // 1. 如果有result属性，使用result
+            // 2. 如果value是对象且包含result，使用value.result
+            // 3. 否则使用value
+            
+            if (model && model.result !== undefined && model.result !== null) {
+              // 公式单元格的结果值
+              cellValue = model.result;
+            } else if (model && model.value !== undefined) {
+              const value = model.value;
+              // 如果value是对象，可能包含公式和结果
+              if (value && typeof value === 'object') {
+                if (value.result !== undefined && value.result !== null) {
+                  cellValue = value.result;
+                } else {
+                  cellValue = value;
+                }
+              } else {
+                cellValue = value;
+              }
+            } else if (cellData.sharedFormula || cellData.formula) {
+              // 公式单元格，尝试获取结果
               const result = cellData.result;
               cellValue = result !== undefined && result !== null ? result : null;
             } else {
@@ -650,7 +683,12 @@ export class PDFMatcher {
               cellValue = sourceCell.value;
             }
           } catch (e) {
-            cellValue = sourceCell.value;
+            // 最后的fallback
+            try {
+              cellValue = sourceCell.value;
+            } catch (e2) {
+              cellValue = null;
+            }
           }
 
           // 设置值

@@ -156,28 +156,38 @@ export class PDFMatcher {
             if (cellData.sharedFormula) {
               // 获取共享公式的结果值
               const result = cellData.result;
+              const value = result !== undefined && result !== null ? result : null;
               
-              // 直接设置值，覆盖共享公式
-              if (result !== undefined && result !== null) {
-                cell.value = result;
-              } else {
-                cell.value = null;
+              // 关键：清除共享公式的内部引用，避免后续writeBuffer时触发错误
+              // 方法1: 直接操作model
+              if (cellData.model) {
+                cellData.model.value = value;
+                delete cellData.model.formula;
+                delete cellData.model.sharedFormula;
               }
+              
+              // 方法2: 覆盖value
+              cell.value = value;
               
               convertedCount++;
             }
             // 也检查普通公式
             else if (cellData.formula) {
               const result = cellData.result;
-              if (result !== undefined && result !== null) {
-                cell.value = result;
-              } else {
-                cell.value = null;
+              const value = result !== undefined && result !== null ? result : null;
+              
+              // 清除公式的内部引用
+              if (cellData.model) {
+                cellData.model.value = value;
+                delete cellData.model.formula;
               }
+              
+              cell.value = value;
               convertedCount++;
             }
           } catch (e) {
             // 忽略错误，继续处理下一个单元格
+            console.error(`转换单元格(${rowNumber}, ${colNumber})时出错:`, e);
           }
         });
       });
@@ -562,7 +572,7 @@ export class PDFMatcher {
   }
 
   /**
-   * 创建干净的工作簿（所有公式已转换为值，只复制值和样式）
+   * 创建干净的工作簿（完全重新构建，避免任何公式引用）
    */
   private async createCleanWorkbook(): Promise<ExcelJS.Workbook> {
     console.log('\\n=== 创建干净的工作簿 ===');
@@ -592,8 +602,25 @@ export class PDFMatcher {
           const sourceCell = sourceRow.getCell(colNumber);
           const newCell = newRow.getCell(colNumber);
 
-          // 直接复制值（所有公式已经在convertSharedFormulasToValues中转换为值）
-          newCell.value = sourceCell.value;
+          // 获取单元格的值（优先使用结果值）
+          let cellValue: any = null;
+          try {
+            const cellData = sourceCell as any;
+            
+            // 如果有公式，使用结果值
+            if (cellData.sharedFormula || cellData.formula) {
+              const result = cellData.result;
+              cellValue = result !== undefined && result !== null ? result : null;
+            } else {
+              // 否则直接使用value
+              cellValue = sourceCell.value;
+            }
+          } catch (e) {
+            cellValue = sourceCell.value;
+          }
+
+          // 设置值
+          newCell.value = cellValue;
 
           // 复制样式
           try {
@@ -606,7 +633,6 @@ export class PDFMatcher {
             if (sourceCell.border) {
               newCell.border = JSON.parse(JSON.stringify(sourceCell.border));
             } else {
-              // 尝试使用第一列的边框样式
               const firstDataCell = sourceRow.getCell(1);
               if (firstDataCell && firstDataCell.border) {
                 newCell.border = JSON.parse(JSON.stringify(firstDataCell.border));

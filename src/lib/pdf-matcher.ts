@@ -151,43 +151,44 @@ export class PDFMatcher {
         row.eachCell((cell, colNumber) => {
           try {
             const cellData = cell as any;
+            const model = cellData.model;
             
-            // 检查是否有共享公式
-            if (cellData.sharedFormula) {
-              // 获取共享公式的结果值
-              const result = cellData.result;
-              const value = result !== undefined && result !== null ? result : null;
-              
-              // 关键：清除共享公式的内部引用，避免后续writeBuffer时触发错误
-              // 方法1: 直接操作model
-              if (cellData.model) {
-                cellData.model.value = value;
-                delete cellData.model.formula;
-                delete cellData.model.sharedFormula;
+            if (!model) return;
+            
+            // 检查model中是否有公式相关信息
+            const hasSharedFormula = model.sharedFormula !== undefined;
+            const hasFormula = model.formula !== undefined;
+            
+            // 获取结果值
+            let result = null;
+            try {
+              result = cellData.result;
+            } catch (e) {
+              // 如果获取result失败，尝试从model获取
+              try {
+                result = model.result;
+              } catch (e2) {
+                result = null;
               }
-              
-              // 方法2: 覆盖value
-              cell.value = value;
-              
-              convertedCount++;
             }
-            // 也检查普通公式
-            else if (cellData.formula) {
-              const result = cellData.result;
-              const value = result !== undefined && result !== null ? result : null;
-              
+            
+            const value = result !== undefined && result !== null ? result : null;
+            
+            if (hasSharedFormula || hasFormula) {
               // 清除公式的内部引用
-              if (cellData.model) {
-                cellData.model.value = value;
-                delete cellData.model.formula;
-              }
+              model.value = value;
+              delete model.formula;
+              delete model.sharedFormula;
+              delete model.result;
               
+              // 覆盖cell的value
               cell.value = value;
+              
               convertedCount++;
             }
           } catch (e) {
             // 忽略错误，继续处理下一个单元格
-            console.error(`转换单元格(${rowNumber}, ${colNumber})时出错:`, e);
+            // console.error(`转换单元格(${rowNumber}, ${colNumber})时出错:`, e);
           }
         });
       });

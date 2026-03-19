@@ -64,7 +64,7 @@ export class PDFMatcher {
   async process(): Promise<{ workbook: ExcelJS.Workbook; statistics: any }> {
     console.log('=== 开始PDF模式处理 ===');
 
-    // 1. 加载Excel文件（不转换公式，保留汇总公式）
+    // 1. 加载Excel文件
     await this.loadExcelFile();
 
     // 2. 识别PDF表格
@@ -79,11 +79,13 @@ export class PDFMatcher {
     // 5. 删除多余的授信品种数据
     this.removeExtraCreditTypes();
 
-    // 6. 修复共享公式引用，确保writeBuffer不会报错
-    // 策略：检查所有共享公式，如果主公式丢失，将克隆转换为值
-    this.fixSharedFormulaReferences();
+    // 6. 计算汇总值（单体表D列、集团表E列）
+    this.calculateSummaryValues();
 
-    // 7. 统计结果
+    // 7. 清理所有公式，避免共享公式验证错误
+    this.clearAllFormulas();
+
+    // 8. 统计结果
     const statistics = {
       totalOrganizations: this.mappings.length,
       matchedCount: this.mappings.filter(m => m.targetRowIndex).length,
@@ -664,12 +666,71 @@ export class PDFMatcher {
   }
 
   /**
-   * 修复共享公式引用
-   * 策略：检查所有共享公式的克隆，如果主公式丢失或被修改，将克隆转换为值
-   * 这样可以避免writeBuffer时的共享公式验证错误，同时尽可能保留汇总公式
+   * 计算汇总值
+   * 单体表：D列（第4列）= 授信品种列（E列开始）的金额总和
+   * 集团表：E列（第5列）= 授信品种列（F列开始）的金额总和
    */
-  private fixSharedFormulaReferences(): void {
-    console.log('\\n=== 修复共享公式引用 ===');
+  private calculateSummaryValues(): void {
+    console.log('\\n=== 计算汇总值 ===');
+
+    // 处理单体表
+    if (this.sourceSheet单体) {
+      this.calculateSheetSummary(this.sourceSheet单体, '单体', 4); // D列
+    }
+
+    // 处理集团表
+    if (this.sourceSheet集团) {
+      this.calculateSheetSummary(this.sourceSheet集团, '集团', 5); // E列
+    }
+  }
+
+  /**
+   * 计算单个工作表的汇总值
+   */
+  private calculateSheetSummary(sheet: ExcelJS.Worksheet, sheetName: string, summaryCol: number): void {
+    console.log(`\\n计算${sheetName}表汇总值 (第${summaryCol}列):`);
+    let calculatedCount = 0;
+
+    // 遍历所有匹配到的机构行
+    for (const mapping of this.mappings) {
+      if (!mapping.targetRowIndex || mapping.sourceSheet !== sheetName) continue;
+
+      const row = mapping.targetRowIndex;
+      let sum = 0;
+      let hasData = false;
+
+      // 从汇总列之后开始累加授信品种金额
+      // 单体表：从E列（第5列）开始
+      // 集团表：从F列（第6列）开始
+      for (let col = summaryCol + 1; col <= 50; col++) {
+        const cell = sheet.getCell(row, col);
+        const value = cell.value;
+        
+        if (typeof value === 'number') {
+          sum += value;
+          hasData = true;
+        }
+      }
+
+      // 只有当有数据时才写入汇总值
+      if (hasData) {
+        const summaryCell = sheet.getCell(row, summaryCol);
+        const oldValue = summaryCell.value;
+        summaryCell.value = sum;
+        calculatedCount++;
+        console.log(`  行${row}: ${oldValue ?? '(空)'} -> ${sum}`);
+      }
+    }
+
+    console.log(`${sheetName}表汇总计算完成，共计算 ${calculatedCount} 行`);
+  }
+
+  /**
+   * 清理所有公式，避免共享公式验证错误
+   * 这是最安全的做法，将所有公式转换为值
+   */
+  private clearAllFormulas(): void {
+    console.log('\\n=== 清理所有公式 ===');
 
     this.targetWorkbook.eachSheet((worksheet, sheetId) => {
       const sheetName = worksheet.name.trim();
@@ -678,11 +739,7 @@ export class PDFMatcher {
       
       if (!isDanTi && !isJiTuan) return;
 
-      // 第一遍：扫描所有单元格，建立共享公式映射
-      // ExcelJS的共享公式：主公式的sharedFormula是一个数字（引用ID）
-      // 克隆单元格的sharedFormula是一个字符串（引用ID）
-      const masterFormulas = new Map<number, { row: number; col: number; cell: any }>(); // ID -> 主公式位置
-      const cloneFormulas: Array<{ row: number; col: number; cell: any; refId: string }> = [];
+      let clearedCount = 0;
 
       worksheet.eachRow((row, rowNumber) => {
         for (let col = 1; col <= 50; col++) {
@@ -691,93 +748,42 @@ export class PDFMatcher {
             const model = (cell as any).model;
             if (!model) continue;
 
-            // 检查共享公式
-            if (model.sharedFormula !== undefined) {
-              if (typeof model.sharedFormula === 'number') {
-                // 主公式
-                masterFormulas.set(model.sharedFormula, { row: rowNumber, col, cell });
-              } else if (typeof model.sharedFormula === 'string') {
-                // 克隆
-                cloneFormulas.push({ row: rowNumber, col, cell, refId: model.sharedFormula });
+            // 检查是否有公式
+            if (model.formula !== undefined || model.sharedFormula !== undefined) {
+              // 获取当前值（可能是公式结果或我们刚计算的汇总值）
+              let value = null;
+              try {
+                if (typeof cell.value === 'number') {
+                  value = cell.value;
+                } else if ((cell as any).result !== undefined) {
+                  value = (cell as any).result;
+                } else if (model.result !== undefined) {
+                  value = model.result;
+                }
+              } catch (e) {
+                // 忽略
               }
+
+              // 清理公式
+              model.value = value;
+              delete model.formula;
+              delete model.sharedFormula;
+              if (model.result !== undefined) delete model.result;
+              cell.value = value;
+              
+              clearedCount++;
             }
           } catch (e) {
-            // 忽略
+            // 忽略错误
           }
         }
       });
 
-      console.log(`  工作表 "${worksheet.name}": 发现 ${masterFormulas.size} 个主公式, ${cloneFormulas.length} 个克隆`);
-
-      // 第二遍：检查每个克隆，如果主公式不在其上方或左侧，转换为值
-      let convertedCount = 0;
-      for (const clone of cloneFormulas) {
-        const refId = parseInt(clone.refId);
-        const master = masterFormulas.get(refId);
-
-        if (!master) {
-          // 主公式不存在，将克隆转换为值
-          this.convertFormulaToValue(clone.cell, clone.row, clone.col);
-          convertedCount++;
-          continue;
-        }
-
-        // 检查主公式是否在克隆的上方或左侧
-        const isAbove = master.row < clone.row;
-        const isLeft = master.col < clone.col;
-
-        if (!isAbove && !isLeft) {
-          // 主公式不在正确位置，将克隆转换为值
-          this.convertFormulaToValue(clone.cell, clone.row, clone.col);
-          convertedCount++;
-        }
-      }
-
-      if (convertedCount > 0) {
-        console.log(`  工作表 "${worksheet.name}" 转换了 ${convertedCount} 个无效克隆公式为值`);
+      if (clearedCount > 0) {
+        console.log(`  工作表 "${worksheet.name}" 清理了 ${clearedCount} 个公式`);
       }
     });
 
-    console.log('共享公式引用修复完成');
-  }
-
-  /**
-   * 将单元格的公式转换为计算结果值
-   */
-  private convertFormulaToValue(cell: any, row: number, col: number): void {
-    try {
-      const model = cell.model;
-      if (!model) return;
-
-      // 获取公式计算结果值
-      let result = null;
-      try {
-        if (cell.result !== undefined && cell.result !== null) {
-          result = cell.result;
-        } else if (model.result !== undefined && model.result !== null) {
-          result = model.result;
-        } else if (typeof cell.value === 'number') {
-          result = cell.value;
-        }
-      } catch (e) {
-        // 忽略
-      }
-
-      // 转换为值
-      const value = result !== null ? result : null;
-      
-      // 清理公式相关的属性
-      model.value = value;
-      delete model.formula;
-      delete model.sharedFormula;
-      if (model.result !== undefined) delete model.result;
-      
-      // 重新设置cell的值
-      cell.value = value;
-      
-      console.log(`    转换: 行${row} 列${col} 公式已转为值: ${value}`);
-    } catch (e) {
-      console.warn(`    转换失败: 行${row} 列${col}`, (e as Error).message);
-    }
+    console.log('公式清理完成');
   }
 }

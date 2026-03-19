@@ -760,8 +760,8 @@ export class PDFMatcher {
       }
     }
 
-    // 第二步：计算C列合并单元格的值（对应E列求和）
-    console.log('\\n2. 计算C列合并单元格值:');
+    // 第二步：为C列合并单元格设置公式
+    console.log('\\n2. 为C列合并单元格设置公式:');
     
     // 获取合并单元格信息
     const model = sheet.model;
@@ -778,19 +778,17 @@ export class PDFMatcher {
               const startRow = parseInt(startMatch[1]);
               const endRow = parseInt(endMatch[1]);
               
-              // 计算这个合并单元格对应的E列求和
-              let cSum = 0;
+              // 构建公式：如 =E4+E5
+              const formulaParts: string[] = [];
               for (let r = startRow; r <= endRow; r++) {
-                const eValue = eColumnValues.get(r);
-                if (eValue !== undefined) {
-                  cSum += eValue;
-                }
+                formulaParts.push(`E${r}`);
               }
+              const formula = formulaParts.join('+');
               
-              // 写入C列值
+              // 为C列合并单元格设置公式
               const cCell = sheet.getCell(startRow, 3); // C列，用master行
-              cCell.value = cSum;
-              console.log(`  C${startRow}:C${endRow} = ${cSum} (E${startRow}:E${endRow}求和)`);
+              cCell.value = { formula: formula };
+              console.log(`  C${startRow}:C${endRow} 公式 = =${formula}`);
             }
           }
         }
@@ -801,11 +799,11 @@ export class PDFMatcher {
   }
 
   /**
-   * 选择性清理公式
-   * 只清理授信品种列和E列的共享公式，保留C列公式
+   * 清理共享公式（保留C列的普通公式）
+   * 策略：只清理共享公式，保留普通公式
    */
   private cleanupFormulasSelective(): void {
-    console.log('\\n=== 选择性清理公式 ===');
+    console.log('\\n=== 清理共享公式 ===');
 
     this.targetWorkbook.eachSheet((worksheet, sheetId) => {
       const sheetName = worksheet.name.trim();
@@ -818,16 +816,15 @@ export class PDFMatcher {
 
       worksheet.eachRow((row, rowNumber) => {
         for (let col = 1; col <= 50; col++) {
-          // 集团表：跳过C列（第3列），保留C列公式
-          if (isJiTuan && col === 3) continue;
-          
           const cell = row.getCell(col);
           try {
             const model = (cell as any).model;
             if (!model) continue;
 
-            // 检查是否有公式
-            if (model.formula !== undefined || model.sharedFormula !== undefined) {
+            // 只清理共享公式，保留普通公式
+            const hasSharedFormula = model.sharedFormula !== undefined;
+            
+            if (hasSharedFormula) {
               // 获取当前值
               let value = null;
               try {
@@ -842,7 +839,7 @@ export class PDFMatcher {
                 // 忽略
               }
 
-              // 清理公式
+              // 清理共享公式，转为值
               model.value = value;
               delete model.formula;
               delete model.sharedFormula;
@@ -858,10 +855,10 @@ export class PDFMatcher {
       });
 
       if (clearedCount > 0) {
-        console.log(`  工作表 "${worksheet.name}" 清理了 ${clearedCount} 个公式（保留C列公式）`);
+        console.log(`  工作表 "${worksheet.name}" 清理了 ${clearedCount} 个共享公式`);
       }
     });
 
-    console.log('选择性公式清理完成');
+    console.log('共享公式清理完成');
   }
 }

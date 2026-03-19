@@ -689,7 +689,7 @@ export class PDFMatcher {
 
   /**
    * 计算单体表汇总值
-   * D列 = E列开始的授信品种金额之和
+   * D列 = 设置SUM公式，如 =SUM(E4:Z4)
    */
   private calculateDanTiSummary(sheet: ExcelJS.Worksheet): void {
     console.log('\\n计算单体表汇总值 (D列):');
@@ -699,28 +699,46 @@ export class PDFMatcher {
       if (!mapping.targetRowIndex || mapping.sourceSheet !== '单体') continue;
 
       const row = mapping.targetRowIndex;
-      let sum = 0;
-      let hasData = false;
-
-      // 从E列（第5列）开始累加授信品种金额
+      
+      // 找出有数据的列范围
+      let startCol = 0;
+      let endCol = 0;
       for (let col = 5; col <= 50; col++) {
         const cell = sheet.getCell(row, col);
         const value = cell.value;
         if (typeof value === 'number' && value !== 0) {
-          sum += value;
-          hasData = true;
+          if (startCol === 0) startCol = col;
+          endCol = col;
         }
       }
 
-      if (hasData) {
+      // 设置SUM公式
+      if (startCol > 0 && endCol >= startCol) {
+        const startColLetter = this.columnToLetter(startCol);
+        const endColLetter = this.columnToLetter(endCol);
+        const formula = `SUM(${startColLetter}${row}:${endColLetter}${row})`;
+        
         const summaryCell = sheet.getCell(row, 4); // D列
-        summaryCell.value = sum;
+        summaryCell.value = { formula: formula };
         calculatedCount++;
-        console.log(`  行${row}: D列 = ${sum}`);
+        console.log(`  行${row}: D列公式 = =${formula}`);
       }
     }
 
     console.log(`单体表汇总计算完成，共 ${calculatedCount} 行`);
+  }
+
+  /**
+   * 列号转字母（如 5 -> E, 28 -> AB）
+   */
+  private columnToLetter(col: number): string {
+    let letter = '';
+    while (col > 0) {
+      const remainder = (col - 1) % 26;
+      letter = String.fromCharCode(65 + remainder) + letter;
+      col = Math.floor((col - 1) / 26);
+    }
+    return letter;
   }
 
   /**

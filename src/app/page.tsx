@@ -539,6 +539,7 @@ export default function Home() {
               <li>✓ F列：企查查T列数据</li>
               <li>✓ G列：企查查E列数据</li>
               <li>✓ I列：H列→银行信息转换</li>
+              <li>✓ L列：K列+随机4位数</li>
             </ul>
           ) : (
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
@@ -640,10 +641,11 @@ export default function Home() {
                   <li>B列：填入企查查D列数据</li>
                   <li>C列：含"公司"填C01，不含填C02</li>
                   <li>D列：V列数据→行业代码表A列匹配→填入B列内容</li>
-                  <li>E列：N列（为"-"时用M列）→行政区划代码表D列匹配→填入C列（空则用下一行）</li>
+                  <li>E列：N列（为"-"时用M列）→行政区划代码表D列匹配→填入C列</li>
                   <li>F列：直接填入企查查T列内容</li>
                   <li>G列：直接填入企查查E列内容</li>
                   <li>I列：H列内容→银行信息表A列匹配→填入B列内容</li>
+                  <li>L列：K列内容+随机4位数字，重复则在首行标注</li>
                 </ul>
               ) : (
                 <ul className="text-amber-800 dark:text-amber-300/80 space-y-1 list-disc list-inside">

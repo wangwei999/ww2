@@ -237,11 +237,41 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // 处理L列：K列数据 + 随机4位数字
+    const lColumnValues: string[] = [];
+    for (let i = 0; i < enterpriseNameData.length; i++) {
+      const row = enterpriseNameData[i];
+      if (row) {
+        const kValue = row[10] ? String(row[10]).trim() : ''; // K列（索引10）
+        if (kValue) {
+          // 生成1000-9999之间的随机4位数字
+          const randomNum = Math.floor(Math.random() * 9000) + 1000;
+          const lValue = kValue + randomNum;
+          row[11] = lValue; // L列（索引11）
+          lColumnValues.push(lValue);
+        }
+      }
+    }
+
+    // 检查L列是否有重复项
+    const lColumnSet = new Set(lColumnValues);
+    const hasDuplicates = lColumnSet.size !== lColumnValues.length;
+    
+    if (hasDuplicates && enterpriseNameData.length > 0) {
+      // 在L列第一行输入"有重复项"
+      if (!enterpriseNameData[0]) {
+        enterpriseNameData[0] = [];
+      }
+      enterpriseNameData[0][11] = '有重复项';
+      console.log('L列存在重复项');
+    }
+
     console.log(`共匹配成功 ${matchCount} 条数据`);
     console.log(`其中C01(含公司) ${c01Count} 条，C02(不含公司) ${c02Count} 条`);
     console.log(`行业代码转换成功 ${industryMatchCount} 条`);
     console.log(`行政区划代码转换成功 ${adminDivisionMatchCount} 条`);
     console.log(`银行信息匹配成功 ${bankMatchCount} 条`);
+    console.log(`L列生成 ${lColumnValues.length} 条数据，${hasDuplicates ? '存在重复' : '无重复'}`);
 
     // 将数据写回工作表
     const newSheet = XLSX.utils.aoa_to_sheet(enterpriseNameData);

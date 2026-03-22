@@ -404,7 +404,7 @@ export default function Home() {
 
           <FileUpload
             label="报表字段（可选）"
-            description="上传包含【行业代码】表的文件，用于转换行业代码"
+            description="上传包含【行业代码】【行政区划代码】【银行信息】表的文件"
             file={reportFieldsFile}
             onFileChange={handleReportFieldsFileChange}
             acceptedTypes=".xlsx,.xls,.csv"
@@ -538,6 +538,7 @@ export default function Home() {
               <li>✓ E列：企查查N/M列→行政区划转换</li>
               <li>✓ F列：企查查T列数据</li>
               <li>✓ G列：企查查E列数据</li>
+              <li>✓ I列：H列→银行信息转换</li>
             </ul>
           ) : (
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
@@ -642,6 +643,7 @@ export default function Home() {
                   <li>E列：N列（为"-"时用M列）→行政区划代码表D列匹配→填入C列（空则用下一行）</li>
                   <li>F列：直接填入企查查T列内容</li>
                   <li>G列：直接填入企查查E列内容</li>
+                  <li>I列：H列内容→银行信息表A列匹配→填入B列内容</li>
                 </ul>
               ) : (
                 <ul className="text-amber-800 dark:text-amber-300/80 space-y-1 list-disc list-inside">

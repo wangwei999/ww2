@@ -54,6 +54,7 @@ export async function POST(request: NextRequest) {
     let industryCodeMap = new Map<string, any>();
     let adminDivisionMap = new Map<string, { cValue: any; cValueNextRow: any }>();
     let adminDivisionData: any[][] = [];
+    let bankInfoMap = new Map<string, any>();
     
     if (reportFieldsFile) {
       const reportFieldsBuffer = await reportFieldsFile.arrayBuffer();
@@ -110,7 +111,32 @@ export async function POST(request: NextRequest) {
         }
         console.log(`行政区划代码映射共 ${adminDivisionMap.size} 条记录`);
       } else {
-        console.log('未找到"行政区划代码"工作表，可用工作表:', reportFieldsWorkbook.SheetNames);
+        console.log('未找到"行政区划代码"工作表');
+      }
+
+      // 查找"银行信息"工作表
+      const bankInfoSheetName = reportFieldsWorkbook.SheetNames.find(
+        name => name.includes('银行信息')
+      );
+      
+      if (bankInfoSheetName) {
+        const bankInfoSheet = reportFieldsWorkbook.Sheets[bankInfoSheetName];
+        const bankInfoData = XLSX.utils.sheet_to_json(bankInfoSheet, { header: 1 }) as any[][];
+        
+        // 构建"银行信息"映射：A列 -> B列
+        for (let i = 0; i < bankInfoData.length; i++) {
+          const row = bankInfoData[i];
+          if (row && row[0]) {
+            const bankName = String(row[0]).trim();
+            const bankValue = row[1]; // B列（索引1）
+            if (bankName) {
+              bankInfoMap.set(bankName, bankValue);
+            }
+          }
+        }
+        console.log(`银行信息映射共 ${bankInfoMap.size} 条记录`);
+      } else {
+        console.log('未找到"银行信息"工作表，可用工作表:', reportFieldsWorkbook.SheetNames);
       }
     }
 
@@ -120,6 +146,7 @@ export async function POST(request: NextRequest) {
     let c02Count = 0;
     let industryMatchCount = 0;
     let adminDivisionMatchCount = 0;
+    let bankMatchCount = 0;
     
     for (let i = 0; i < enterpriseNameData.length; i++) {
       const row = enterpriseNameData[i];
@@ -185,8 +212,18 @@ export async function POST(request: NextRequest) {
           
           // 在G列（索引6）填入企查查E列内容
           row[6] = qichachaRow.eValue;
-          
-          console.log(`匹配成功: ${enterpriseName} -> B:${row[1]}, C:${row[2]}, D:${row[3]}, E:${row[4]}, F:${row[5]}, G:${row[6]}`);
+        }
+        
+        // 在I列（索引8）处理银行信息匹配（独立匹配，不依赖企查查）
+        // 将企业名称表H列（索引7）内容与银行信息表A列匹配
+        const hValue = row[7] ? String(row[7]).trim() : '';
+        if (hValue && bankInfoMap.has(hValue)) {
+          row[8] = bankInfoMap.get(hValue);
+          bankMatchCount++;
+        }
+        
+        if (qichachaMap.has(enterpriseName)) {
+          console.log(`匹配成功: ${enterpriseName} -> B:${row[1]}, C:${row[2]}, D:${row[3]}, E:${row[4]}, F:${row[5]}, G:${row[6]}, I:${row[8]}`);
         }
       }
     }
@@ -195,6 +232,7 @@ export async function POST(request: NextRequest) {
     console.log(`其中C01(含公司) ${c01Count} 条，C02(不含公司) ${c02Count} 条`);
     console.log(`行业代码转换成功 ${industryMatchCount} 条`);
     console.log(`行政区划代码转换成功 ${adminDivisionMatchCount} 条`);
+    console.log(`银行信息匹配成功 ${bankMatchCount} 条`);
 
     // 将数据写回工作表
     const newSheet = XLSX.utils.aoa_to_sheet(enterpriseNameData);

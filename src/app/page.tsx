@@ -163,16 +163,51 @@ export default function Home() {
                   'qichachaDataFile:', qichachaDataFile?.name, 
                   'reportFieldsFile:', reportFieldsFile?.name);
       
-      if (!enterpriseNameFile || !qichachaDataFile || !reportFieldsFile) {
-        toast.error('请上传所有三个文件');
+      if (!enterpriseNameFile || !qichachaDataFile) {
+        toast.error('请上传企业名称文件和企查查数据文件');
         return;
       }
 
       setProcessing(true);
       
       try {
-        // TODO: 实现基础数据处理逻辑
-        toast.info('基础数据处理功能开发中...');
+        const formData = new FormData();
+        formData.append('enterpriseNameFile', enterpriseNameFile);
+        formData.append('qichachaDataFile', qichachaDataFile);
+        if (reportFieldsFile) {
+          formData.append('reportFieldsFile', reportFieldsFile);
+        }
+
+        const response = await fetch('/api/process-basic', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || '处理失败');
+        }
+
+        // 从响应头获取文件名
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = `基础数据处理结果_${Date.now()}.xlsx`;
+        if (contentDisposition) {
+          const filenameMatch = contentDisposition.match(/filename\*?=['"]?(?:UTF-\d['"]*)?([^;'"]+)/i);
+          if (filenameMatch) {
+            filename = decodeURIComponent(filenameMatch[1]);
+          }
+        }
+
+        // 直接下载文件
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.click();
+        window.URL.revokeObjectURL(url);
+        
+        toast.success('基础数据处理完成，文件已下载！');
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : '处理失败，请重试';
         toast.error(errorMessage);
@@ -368,7 +403,7 @@ export default function Home() {
           />
 
           <FileUpload
-            label="报表字段"
+            label="报表字段（可选）"
             description="上传报表字段数据文件"
             file={reportFieldsFile}
             onFileChange={handleReportFieldsFileChange}
@@ -406,7 +441,8 @@ export default function Home() {
       return !pdfFile || !excelFile;
     }
     if (mode === 'basic') {
-      return !enterpriseNameFile || !qichachaDataFile || !reportFieldsFile;
+      // 基础数据模式只需要企业名称和企查查数据文件，报表字段可选
+      return !enterpriseNameFile || !qichachaDataFile;
     }
     return !fileA || !fileB;
   };

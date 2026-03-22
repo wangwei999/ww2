@@ -532,10 +532,10 @@ export default function Home() {
             </ul>
           ) : mode === 'basic' ? (
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
-              <li>✓ 企业名称与企查查数据匹配</li>
-              <li>✓ B列填入企查查D列数据</li>
-              <li>✓ C列根据是否含"公司"填分类码</li>
-              <li>✓ D列填入企查查V列并转换行业代码</li>
+              <li>✓ B列：企查查D列数据</li>
+              <li>✓ C列：含"公司"填C01，否则C02</li>
+              <li>✓ D列：企查查V列→行业代码转换</li>
+              <li>✓ E列：企查查N/M列→行政区划转换</li>
             </ul>
           ) : (
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
@@ -634,11 +634,11 @@ export default function Home() {
                 </ul>
               ) : mode === 'basic' ? (
                 <ul className="text-amber-800 dark:text-amber-300/80 space-y-1 list-disc list-inside">
-                  <li>企业名称表A列与企查查数据表A列匹配</li>
-                  <li>匹配成功后B列填入企查查D列数据</li>
-                  <li>C列：含"公司"填C01，不含"公司"填C02</li>
-                  <li>D列：先填入企查查V列，再用行业代码表转换</li>
-                  <li>报表字段文件需包含"行业代码"工作表</li>
+                  <li>B列：填入企查查D列数据</li>
+                  <li>C列：含"公司"填C01，不含填C02</li>
+                  <li>D列：V列数据→行业代码表A列匹配→填入B列内容</li>
+                  <li>E列：N列（为"-"时用M列）→行政区划代码表D列匹配→填入C列（空则用下一行）</li>
+                  <li>报表字段文件需包含"行业代码"和"行政区划代码"工作表</li>
                 </ul>
               ) : (
                 <ul className="text-amber-800 dark:text-amber-300/80 space-y-1 list-disc list-inside">

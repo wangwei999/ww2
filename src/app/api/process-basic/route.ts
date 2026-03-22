@@ -30,24 +30,29 @@ export async function POST(request: NextRequest) {
     const qichachaDataSheet = qichachaDataWorkbook.Sheets[qichachaDataSheetName];
     const qichachaData = XLSX.utils.sheet_to_json(qichachaDataSheet, { header: 1 }) as any[][];
 
-    // 构建企查查数据映射：A列名称 -> { D列数据, V列数据 }
-    const qichachaMap = new Map<string, { dValue: any; vValue: any }>();
+    // 构建企查查数据映射：A列名称 -> { D列数据, V列数据, N列数据, M列数据 }
+    const qichachaMap = new Map<string, { dValue: any; vValue: any; nValue: any; mValue: any }>();
     for (let i = 0; i < qichachaData.length; i++) {
       const row = qichachaData[i];
       if (row && row[0]) {
         const name = String(row[0]).trim();
         const dValue = row[3]; // D列（索引3）
+        const mValue = row[12]; // M列（索引12）
+        const nValue = row[13]; // N列（索引13）
         const vValue = row[21]; // V列（索引21）
         if (name) {
-          qichachaMap.set(name, { dValue, vValue });
+          qichachaMap.set(name, { dValue, vValue, nValue, mValue });
         }
       }
     }
 
     console.log(`企查查数据共 ${qichachaMap.size} 条记录`);
 
-    // 读取报表字段文件中的"行业代码"表
+    // 读取报表字段文件
     let industryCodeMap = new Map<string, any>();
+    let adminDivisionMap = new Map<string, { cValue: any; cValueNextRow: any }>();
+    let adminDivisionData: any[][] = [];
+    
     if (reportFieldsFile) {
       const reportFieldsBuffer = await reportFieldsFile.arrayBuffer();
       const reportFieldsWorkbook = XLSX.read(Buffer.from(reportFieldsBuffer), { type: 'buffer' });
@@ -74,7 +79,36 @@ export async function POST(request: NextRequest) {
         }
         console.log(`行业代码映射共 ${industryCodeMap.size} 条记录`);
       } else {
-        console.log('未找到"行业代码"工作表，可用工作表:', reportFieldsWorkbook.SheetNames);
+        console.log('未找到"行业代码"工作表');
+      }
+
+      // 查找"行政区划代码"工作表
+      const adminDivisionSheetName = reportFieldsWorkbook.SheetNames.find(
+        name => name.includes('行政区划代码')
+      );
+      
+      if (adminDivisionSheetName) {
+        const adminDivisionSheet = reportFieldsWorkbook.Sheets[adminDivisionSheetName];
+        adminDivisionData = XLSX.utils.sheet_to_json(adminDivisionSheet, { header: 1 }) as any[][];
+        
+        // 构建"行政区划代码"映射：D列 -> { C列值, C列下一行值 }
+        for (let i = 0; i < adminDivisionData.length; i++) {
+          const row = adminDivisionData[i];
+          if (row && row[3]) { // D列（索引3）
+            const dValue = String(row[3]).trim();
+            const cValue = row[2]; // C列（索引2）
+            // 获取下一行C列的值
+            const cValueNextRow = (i + 1 < adminDivisionData.length && adminDivisionData[i + 1]) 
+              ? adminDivisionData[i + 1][2] 
+              : null;
+            if (dValue) {
+              adminDivisionMap.set(dValue, { cValue, cValueNextRow });
+            }
+          }
+        }
+        console.log(`行政区划代码映射共 ${adminDivisionMap.size} 条记录`);
+      } else {
+        console.log('未找到"行政区划代码"工作表，可用工作表:', reportFieldsWorkbook.SheetNames);
       }
     }
 
@@ -83,6 +117,7 @@ export async function POST(request: NextRequest) {
     let c01Count = 0;
     let c02Count = 0;
     let industryMatchCount = 0;
+    let adminDivisionMatchCount = 0;
     
     for (let i = 0; i < enterpriseNameData.length; i++) {
       const row = enterpriseNameData[i];
@@ -111,11 +146,39 @@ export async function POST(request: NextRequest) {
           if (vValue && industryCodeMap.has(vValue)) {
             row[3] = industryCodeMap.get(vValue);
             industryMatchCount++;
-            console.log(`匹配成功: ${enterpriseName} -> B:${qichachaRow.dValue}, C:${row[2]}, D:${row[3]}(行业代码转换)`);
           } else {
             row[3] = qichachaRow.vValue;
-            console.log(`匹配成功: ${enterpriseName} -> B:${qichachaRow.dValue}, C:${row[2]}, D:${row[3]}(V列原值)`);
           }
+          
+          // 在E列（索引4）处理N列/M列数据和行政区划代码转换
+          // 获取N列内容，如果N列显示"-"则用M列内容
+          let eValue = '';
+          const nValue = qichachaRow.nValue ? String(qichachaRow.nValue).trim() : '';
+          const mValue = qichachaRow.mValue ? String(qichachaRow.mValue).trim() : '';
+          
+          if (nValue === '-' || nValue === '') {
+            eValue = mValue;
+          } else {
+            eValue = nValue;
+          }
+          
+          // 再用E列值与"行政区划代码"表D列匹配
+          if (eValue && adminDivisionMap.has(eValue)) {
+            const adminData = adminDivisionMap.get(eValue)!;
+            // 如果C列有数据，用C列内容；否则用C列下一行数据
+            if (adminData.cValue !== null && adminData.cValue !== undefined && adminData.cValue !== '') {
+              row[4] = adminData.cValue;
+            } else if (adminData.cValueNextRow !== null && adminData.cValueNextRow !== undefined) {
+              row[4] = adminData.cValueNextRow;
+            } else {
+              row[4] = eValue; // 都没有则保留原值
+            }
+            adminDivisionMatchCount++;
+          } else {
+            row[4] = eValue;
+          }
+          
+          console.log(`匹配成功: ${enterpriseName} -> B:${row[1]}, C:${row[2]}, D:${row[3]}, E:${row[4]}`);
         }
       }
     }
@@ -123,6 +186,7 @@ export async function POST(request: NextRequest) {
     console.log(`共匹配成功 ${matchCount} 条数据`);
     console.log(`其中C01(含公司) ${c01Count} 条，C02(不含公司) ${c02Count} 条`);
     console.log(`行业代码转换成功 ${industryMatchCount} 条`);
+    console.log(`行政区划代码转换成功 ${adminDivisionMatchCount} 条`);
 
     // 将数据写回工作表
     const newSheet = XLSX.utils.aoa_to_sheet(enterpriseNameData);

@@ -9,7 +9,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Upload, FileSpreadsheet, Download, Loader2, CheckCircle, AlertCircle, X, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 
-type ProcessMode = 'normal' | 'credit' | 'pdf';
+type ProcessMode = 'normal' | 'credit' | 'pdf' | 'basic';
 
 interface FileUploadProps {
   label: string;
@@ -91,6 +91,10 @@ export default function Home() {
   const [fileB, setFileB] = useState<File | null>(null);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [excelFile, setExcelFile] = useState<File | null>(null);
+  // 基础数据模式文件
+  const [enterpriseNameFile, setEnterpriseNameFile] = useState<File | null>(null);
+  const [qichachaDataFile, setQichachaDataFile] = useState<File | null>(null);
+  const [reportFieldsFile, setReportFieldsFile] = useState<File | null>(null);
   const [processing, setProcessing] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [hasProcessedFile, setHasProcessedFile] = useState(false);
@@ -131,12 +135,54 @@ export default function Home() {
     clearProcessedState();
   };
 
+  // 基础数据模式文件处理
+  const handleEnterpriseNameFileChange = (file: File | null) => {
+    setEnterpriseNameFile(file);
+    clearProcessedState();
+  };
+
+  const handleQichachaDataFileChange = (file: File | null) => {
+    setQichachaDataFile(file);
+    clearProcessedState();
+  };
+
+  const handleReportFieldsFileChange = (file: File | null) => {
+    setReportFieldsFile(file);
+    clearProcessedState();
+  };
+
   const handleModeChange = (newMode: ProcessMode) => {
     setMode(newMode);
     clearProcessedState();
   };
 
   const handleProcess = async () => {
+    if (mode === 'basic') {
+      // 基础数据处理
+      console.log('基础数据处理 - enterpriseNameFile:', enterpriseNameFile?.name, 
+                  'qichachaDataFile:', qichachaDataFile?.name, 
+                  'reportFieldsFile:', reportFieldsFile?.name);
+      
+      if (!enterpriseNameFile || !qichachaDataFile || !reportFieldsFile) {
+        toast.error('请上传所有三个文件');
+        return;
+      }
+
+      setProcessing(true);
+      
+      try {
+        // TODO: 实现基础数据处理逻辑
+        toast.info('基础数据处理功能开发中...');
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : '处理失败，请重试';
+        toast.error(errorMessage);
+        console.error('处理错误:', error);
+      } finally {
+        setProcessing(false);
+      }
+      return;
+    }
+
     if (mode === 'pdf') {
       // 授信写入处理
       console.log('授信写入处理 - pdfFile:', pdfFile?.name, 'excelFile:', excelFile?.name);
@@ -302,6 +348,36 @@ export default function Home() {
       );
     }
 
+    if (mode === 'basic') {
+      return (
+        <div className="space-y-6">
+          <FileUpload
+            label="企业名称"
+            description="上传包含企业名称数据的文件"
+            file={enterpriseNameFile}
+            onFileChange={handleEnterpriseNameFileChange}
+            acceptedTypes=".xlsx,.xls,.csv"
+          />
+
+          <FileUpload
+            label="企查查数据"
+            description="上传企查查数据文件"
+            file={qichachaDataFile}
+            onFileChange={handleQichachaDataFileChange}
+            acceptedTypes=".xlsx,.xls,.csv"
+          />
+
+          <FileUpload
+            label="报表字段"
+            description="上传报表字段数据文件"
+            file={reportFieldsFile}
+            onFileChange={handleReportFieldsFileChange}
+            acceptedTypes=".xlsx,.xls,.csv"
+          />
+        </div>
+      );
+    }
+
     return (
       <div className="space-y-6">
         <FileUpload
@@ -329,12 +405,15 @@ export default function Home() {
     if (mode === 'pdf') {
       return !pdfFile || !excelFile;
     }
+    if (mode === 'basic') {
+      return !enterpriseNameFile || !qichachaDataFile || !reportFieldsFile;
+    }
     return !fileA || !fileB;
   };
 
-  // 获取下载按钮是否禁用（授信写入模式直接下载，不需要下载按钮）
+  // 获取下载按钮是否禁用（授信写入模式和基础数据模式直接下载，不需要下载按钮）
   const isDownloadDisabled = () => {
-    if (mode === 'pdf') return true;
+    if (mode === 'pdf' || mode === 'basic') return true;
     return downloading || !hasProcessedFile;
   };
 
@@ -359,7 +438,7 @@ export default function Home() {
             <RadioGroup
               value={mode}
               onValueChange={(value) => handleModeChange(value as ProcessMode)}
-              className="grid grid-cols-1 md:grid-cols-3 gap-4"
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"
             >
               <div className="flex items-center space-x-2 p-4 border rounded-lg hover:bg-muted/50 cursor-pointer">
                 <RadioGroupItem value="normal" id="normal" />
@@ -388,6 +467,15 @@ export default function Home() {
                   </p>
                 </div>
               </div>
+              <div className="flex items-center space-x-2 p-4 border rounded-lg hover:bg-muted/50 cursor-pointer">
+                <RadioGroupItem value="basic" id="basic" />
+                <div className="flex-1">
+                  <Label htmlFor="basic" className="font-medium cursor-pointer">基础数据</Label>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    处理企业名称、企查查数据、报表字段
+                  </p>
+                </div>
+              </div>
             </RadioGroup>
           </div>
         </Card>
@@ -395,7 +483,7 @@ export default function Home() {
         {/* 功能说明 */}
         <Card className="p-6 bg-muted/50">
           <h3 className="font-semibold mb-3">
-            {mode === 'pdf' ? '授信写入功能' : '支持的功能'}
+            {mode === 'pdf' ? '授信写入功能' : mode === 'basic' ? '基础数据处理功能' : '支持的功能'}
           </h3>
           {mode === 'pdf' ? (
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
@@ -405,6 +493,13 @@ export default function Home() {
               <li>✓ 自动填充金额并标记红色</li>
               <li>✓ 删除多余的授信品种数据</li>
               <li>✓ 修改内容用红色字体显示</li>
+            </ul>
+          ) : mode === 'basic' ? (
+            <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
+              <li>✓ 处理企业名称数据</li>
+              <li>✓ 整合企查查数据</li>
+              <li>✓ 匹配报表字段信息</li>
+              <li>✓ 自动生成数据报告</li>
             </ul>
           ) : (
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
@@ -439,6 +534,11 @@ export default function Home() {
                 <FileText className="mr-2 h-4 w-4" />
                 识别并处理
               </>
+            ) : mode === 'basic' ? (
+              <>
+                <Upload className="mr-2 h-4 w-4" />
+                开始处理
+              </>
             ) : (
               <>
                 <Upload className="mr-2 h-4 w-4" />
@@ -447,7 +547,7 @@ export default function Home() {
             )}
           </Button>
 
-          {mode !== 'pdf' && (
+          {mode !== 'pdf' && mode !== 'basic' && (
             <div className="flex flex-col items-center gap-2">
               <Button
                 onClick={handleDownload}
@@ -495,6 +595,13 @@ export default function Home() {
                   <li>单体表机构字段在B列，授信品种在第3行</li>
                   <li>集团表机构字段在D列，授信品种在第3行</li>
                   <li>修改的内容会用红色字体标记</li>
+                </ul>
+              ) : mode === 'basic' ? (
+                <ul className="text-amber-800 dark:text-amber-300/80 space-y-1 list-disc list-inside">
+                  <li>企业名称文件应包含企业名称列表</li>
+                  <li>企查查数据文件应包含企业相关信息</li>
+                  <li>报表字段文件应包含字段定义数据</li>
+                  <li>支持 Excel 和 CSV 格式文件</li>
                 </ul>
               ) : (
                 <ul className="text-amber-800 dark:text-amber-300/80 space-y-1 list-disc list-inside">

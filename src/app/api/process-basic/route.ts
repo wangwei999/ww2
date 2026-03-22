@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
-import path from 'path';
-import fs from 'fs';
 
 export async function POST(request: NextRequest) {
   try {
@@ -49,6 +47,8 @@ export async function POST(request: NextRequest) {
 
     // 匹配并填充数据
     let matchCount = 0;
+    let c01Count = 0;
+    let c02Count = 0;
     for (let i = 0; i < enterpriseNameData.length; i++) {
       const row = enterpriseNameData[i];
       if (row && row[0]) {
@@ -57,12 +57,22 @@ export async function POST(request: NextRequest) {
           // 在B列（索引1）填入企查查D列数据
           row[1] = qichachaMap.get(enterpriseName);
           matchCount++;
-          console.log(`匹配成功: ${enterpriseName} -> ${qichachaMap.get(enterpriseName)}`);
+          
+          // 在C列（索引2）根据是否包含"公司"填入分类码
+          if (enterpriseName.includes('公司')) {
+            row[2] = 'C01';
+            c01Count++;
+          } else {
+            row[2] = 'C02';
+            c02Count++;
+          }
+          
+          console.log(`匹配成功: ${enterpriseName} -> B列:${qichachaMap.get(enterpriseName)}, C列:${row[2]}`);
         }
       }
     }
 
-    console.log(`共匹配成功 ${matchCount} 条数据`);
+    console.log(`共匹配成功 ${matchCount} 条数据，其中C01(含公司) ${c01Count} 条，C02(不含公司) ${c02Count} 条`);
 
     // 将数据写回工作表
     const newSheet = XLSX.utils.aoa_to_sheet(enterpriseNameData);

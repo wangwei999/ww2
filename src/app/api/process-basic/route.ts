@@ -280,10 +280,10 @@ export async function POST(request: NextRequest) {
     // 生成输出文件
     const outputBuffer = XLSX.write(enterpriseNameWorkbook, { type: 'buffer', bookType: 'xlsx' });
 
-    // 生成文件名
+    // 生成文件名：日期+PJRZFS（如0322PJRZFS.xlsx）
     const now = new Date();
-    const datePrefix = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-    const filename = `${datePrefix}基础数据处理结果.xlsx`;
+    const datePrefix = `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    const filename = `${datePrefix}PJRZFS.xlsx`;
 
     // 返回文件
     return new NextResponse(outputBuffer, {

@@ -155,8 +155,9 @@ export async function POST(request: NextRequest) {
         if (enterpriseName && qichachaMap.has(enterpriseName)) {
           const qichachaRow = qichachaMap.get(enterpriseName)!;
           
-          // 在B列（索引1）填入企查查D列数据
-          row[1] = qichachaRow.dValue;
+          // 在B列（索引1）填入企查查D列数据，为空则填入"-"
+          row[1] = qichachaRow.dValue !== null && qichachaRow.dValue !== undefined && qichachaRow.dValue !== '' 
+            ? qichachaRow.dValue : '-';
           matchCount++;
           
           // 在C列（索引2）根据是否包含"公司"填入分类码
@@ -172,11 +173,13 @@ export async function POST(request: NextRequest) {
           const vValue = qichachaRow.vValue ? String(qichachaRow.vValue).trim() : '';
           
           // 再用D列值与"行业代码"表A列匹配，如果匹配成功则替换为B列内容
-          if (vValue && industryCodeMap.has(vValue)) {
+          if (vValue && vValue !== '-' && industryCodeMap.has(vValue)) {
             row[3] = industryCodeMap.get(vValue);
             industryMatchCount++;
+          } else if (vValue && vValue !== '-') {
+            row[3] = vValue;
           } else {
-            row[3] = qichachaRow.vValue;
+            row[3] = '-';
           }
           
           // 在E列（索引4）处理N列/M列数据和行政区划代码转换
@@ -192,7 +195,7 @@ export async function POST(request: NextRequest) {
           }
           
           // 再用E列值与"行政区划代码"表D列匹配
-          if (eValue && adminDivisionMap.has(eValue)) {
+          if (eValue && eValue !== '-' && adminDivisionMap.has(eValue)) {
             const adminData = adminDivisionMap.get(eValue)!;
             // 如果C列有数据，用C列内容；否则用C列下一行数据
             if (adminData.cValue !== null && adminData.cValue !== undefined && adminData.cValue !== '') {
@@ -203,23 +206,29 @@ export async function POST(request: NextRequest) {
               row[4] = eValue; // 都没有则保留原值
             }
             adminDivisionMatchCount++;
-          } else {
+          } else if (eValue && eValue !== '-') {
             row[4] = eValue;
+          } else {
+            row[4] = '-';
           }
           
-          // 在F列（索引5）填入企查查T列内容
-          row[5] = qichachaRow.tValue;
+          // 在F列（索引5）填入企查查T列内容，为空则填入"-"
+          row[5] = qichachaRow.tValue !== null && qichachaRow.tValue !== undefined && qichachaRow.tValue !== '' 
+            ? qichachaRow.tValue : '-';
           
-          // 在G列（索引6）填入企查查E列内容
-          row[6] = qichachaRow.eValue;
+          // 在G列（索引6）填入企查查E列内容，为空则填入"-"
+          row[6] = qichachaRow.eValue !== null && qichachaRow.eValue !== undefined && qichachaRow.eValue !== '' 
+            ? qichachaRow.eValue : '-';
         }
         
         // 在I列（索引8）处理银行信息匹配（独立匹配，不依赖企查查）
         // 将企业名称表H列（索引7）内容与银行信息表A列匹配
         const hValue = row[7] ? String(row[7]).trim() : '';
-        if (hValue && bankInfoMap.has(hValue)) {
+        if (hValue && hValue !== '-' && bankInfoMap.has(hValue)) {
           row[8] = bankInfoMap.get(hValue);
           bankMatchCount++;
+        } else {
+          row[8] = '-';
         }
         
         if (qichachaMap.has(enterpriseName)) {

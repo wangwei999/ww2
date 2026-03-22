@@ -4,11 +4,11 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: {
-    default: '授信数据填充 | 扣子编程',
+    default: '业务数据填充 | 扣子编程',
     template: '%s | 扣子编程',
   },
   description:
-    '授信数据填充工具，支持PDF识别、智能匹配、自动填充授信数据到Excel表格。',
+    '业务数据填充工具，支持PDF识别、智能匹配、自动填充授信数据到Excel表格。',
   keywords: [
     '授信数据',
     '数据填充',
@@ -23,11 +23,11 @@ export const metadata: Metadata = {
   //   icon: '',
   // },
   openGraph: {
-    title: '授信数据填充 | 扣子编程',
+    title: '业务数据填充 | 扣子编程',
     description:
-      '授信数据填充工具，支持PDF识别、智能匹配、自动填充授信数据到Excel表格。',
+      '业务数据填充工具，支持PDF识别、智能匹配、自动填充授信数据到Excel表格。',
     url: 'https://code.coze.cn',
-    siteName: '授信数据填充',
+    siteName: '业务数据填充',
     locale: 'zh_CN',
     type: 'website',
     // images: [

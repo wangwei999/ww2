@@ -404,7 +404,7 @@ export default function Home() {
 
           <FileUpload
             label="报表字段（可选）"
-            description="上传报表字段数据文件"
+            description="上传包含【行业代码】表的文件，用于转换行业代码"
             file={reportFieldsFile}
             onFileChange={handleReportFieldsFileChange}
             acceptedTypes=".xlsx,.xls,.csv"
@@ -532,10 +532,10 @@ export default function Home() {
             </ul>
           ) : mode === 'basic' ? (
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
-              <li>✓ 处理企业名称数据</li>
-              <li>✓ 整合企查查数据</li>
-              <li>✓ 匹配报表字段信息</li>
-              <li>✓ 自动生成数据报告</li>
+              <li>✓ 企业名称与企查查数据匹配</li>
+              <li>✓ B列填入企查查D列数据</li>
+              <li>✓ C列根据是否含"公司"填分类码</li>
+              <li>✓ D列填入企查查V列并转换行业代码</li>
             </ul>
           ) : (
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
@@ -634,10 +634,11 @@ export default function Home() {
                 </ul>
               ) : mode === 'basic' ? (
                 <ul className="text-amber-800 dark:text-amber-300/80 space-y-1 list-disc list-inside">
-                  <li>企业名称文件应包含企业名称列表</li>
-                  <li>企查查数据文件应包含企业相关信息</li>
-                  <li>报表字段文件应包含字段定义数据</li>
-                  <li>支持 Excel 和 CSV 格式文件</li>
+                  <li>企业名称表A列与企查查数据表A列匹配</li>
+                  <li>匹配成功后B列填入企查查D列数据</li>
+                  <li>C列：含"公司"填C01，不含"公司"填C02</li>
+                  <li>D列：先填入企查查V列，再用行业代码表转换</li>
+                  <li>报表字段文件需包含"行业代码"工作表</li>
                 </ul>
               ) : (
                 <ul className="text-amber-800 dark:text-amber-300/80 space-y-1 list-disc list-inside">

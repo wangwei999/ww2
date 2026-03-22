@@ -30,18 +30,20 @@ export async function POST(request: NextRequest) {
     const qichachaDataSheet = qichachaDataWorkbook.Sheets[qichachaDataSheetName];
     const qichachaData = XLSX.utils.sheet_to_json(qichachaDataSheet, { header: 1 }) as any[][];
 
-    // 构建企查查数据映射：A列名称 -> { D列数据, V列数据, N列数据, M列数据 }
-    const qichachaMap = new Map<string, { dValue: any; vValue: any; nValue: any; mValue: any }>();
+    // 构建企查查数据映射：A列名称 -> { D列数据, E列数据, M列数据, N列数据, T列数据, V列数据 }
+    const qichachaMap = new Map<string, { dValue: any; eValue: any; mValue: any; nValue: any; tValue: any; vValue: any }>();
     for (let i = 0; i < qichachaData.length; i++) {
       const row = qichachaData[i];
       if (row && row[0]) {
         const name = String(row[0]).trim();
         const dValue = row[3]; // D列（索引3）
+        const eValue = row[4]; // E列（索引4）
         const mValue = row[12]; // M列（索引12）
         const nValue = row[13]; // N列（索引13）
+        const tValue = row[19]; // T列（索引19）
         const vValue = row[21]; // V列（索引21）
         if (name) {
-          qichachaMap.set(name, { dValue, vValue, nValue, mValue });
+          qichachaMap.set(name, { dValue, eValue, mValue, nValue, tValue, vValue });
         }
       }
     }
@@ -178,7 +180,13 @@ export async function POST(request: NextRequest) {
             row[4] = eValue;
           }
           
-          console.log(`匹配成功: ${enterpriseName} -> B:${row[1]}, C:${row[2]}, D:${row[3]}, E:${row[4]}`);
+          // 在F列（索引5）填入企查查T列内容
+          row[5] = qichachaRow.tValue;
+          
+          // 在G列（索引6）填入企查查E列内容
+          row[6] = qichachaRow.eValue;
+          
+          console.log(`匹配成功: ${enterpriseName} -> B:${row[1]}, C:${row[2]}, D:${row[3]}, E:${row[4]}, F:${row[5]}, G:${row[6]}`);
         }
       }
     }

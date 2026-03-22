@@ -536,6 +536,8 @@ export default function Home() {
               <li>✓ C列：含"公司"填C01，否则C02</li>
               <li>✓ D列：企查查V列→行业代码转换</li>
               <li>✓ E列：企查查N/M列→行政区划转换</li>
+              <li>✓ F列：企查查T列数据</li>
+              <li>✓ G列：企查查E列数据</li>
             </ul>
           ) : (
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
@@ -638,7 +640,8 @@ export default function Home() {
                   <li>C列：含"公司"填C01，不含填C02</li>
                   <li>D列：V列数据→行业代码表A列匹配→填入B列内容</li>
                   <li>E列：N列（为"-"时用M列）→行政区划代码表D列匹配→填入C列（空则用下一行）</li>
-                  <li>报表字段文件需包含"行业代码"和"行政区划代码"工作表</li>
+                  <li>F列：直接填入企查查T列内容</li>
+                  <li>G列：直接填入企查查E列内容</li>
                 </ul>
               ) : (
                 <ul className="text-amber-800 dark:text-amber-300/80 space-y-1 list-disc list-inside">

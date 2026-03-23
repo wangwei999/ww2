@@ -286,10 +286,12 @@ export async function POST(request: NextRequest) {
           
           // 如果不是以"股份有限公司"结尾，则进行标准化
           if (!normalizedBankName.endsWith('股份有限公司')) {
-            // 匹配"XX银行"开头或以"XX银行"结尾的情况
+            // 匹配"XX银行"开头的情况
             const bankMatch = normalizedBankName.match(/^(.+?银行)/);
             if (bankMatch) {
               normalizedBankName = bankMatch[1] + '股份有限公司';
+              // 将标准化后的名称写回H列
+              row[7] = normalizedBankName;
             }
           }
           
@@ -304,7 +306,7 @@ export async function POST(request: NextRequest) {
         }
         
         if (qichachaMap.has(enterpriseName)) {
-          console.log(`匹配成功: ${enterpriseName} -> B:${row[1]}, C:${row[2]}, D:${row[3]}, E:${row[4]}, F:${row[5]}, G:${row[6]}, I:${row[8]}`);
+          console.log(`匹配成功: ${enterpriseName} -> B:${row[1]}, C:${row[2]}, D:${row[3]}, E:${row[4]}, F:${row[5]}, G:${row[6]}, H:${row[7]}, I:${row[8]}`);
         }
       }
     }

@@ -253,22 +253,33 @@ export async function POST(request: NextRequest) {
             row[4] = '-';
           }
           
-          // 在F列（索引5）填入企查查T列内容，为空则填入"-"
-          row[5] = qichachaRow.tValue !== null && qichachaRow.tValue !== undefined && qichachaRow.tValue !== '' 
-            ? qichachaRow.tValue : '-';
+          // 在F列（索引5）处理企查查T列内容
+          const tValue = qichachaRow.tValue ? String(qichachaRow.tValue).trim() : '';
+          if (tValue && tValue !== '-') {
+            // 特殊处理：三类有限责任公司统一改成B01
+            if (tValue === '有限责任公司（自然人独资）' || 
+                tValue === '有限责任公司（自然人投资或控股）' || 
+                tValue === '有限责任公司（自然人投资或控股的法人独资）') {
+              row[5] = 'B01';
+            } else {
+              row[5] = tValue;
+            }
+          } else {
+            row[5] = '-';
+          }
           
           // 在G列（索引6）根据企查查E列内容转换企业规模代码
           const eColValue = qichachaRow.eValue ? String(qichachaRow.eValue).trim() : '';
           if (eColValue && eColValue !== '-') {
-            // 根据企业规模转换代码
-            if (eColValue.includes('S') || eColValue === 'S(小型)') {
+            // 根据企业规模转换代码（注意：先检查XS，再检查S，避免XS被S误匹配）
+            if (eColValue.includes('XS') || eColValue === 'XS(微型)') {
+              row[6] = 'CS04'; // 微型
+            } else if (eColValue.includes('S') || eColValue === 'S(小型)') {
               row[6] = 'CS03'; // 小型
             } else if (eColValue.includes('M') || eColValue === 'M(中型)') {
               row[6] = 'CS02'; // 中型
             } else if (eColValue.includes('L') || eColValue === 'L(大型)') {
               row[6] = 'CS01'; // 大型
-            } else if (eColValue.includes('XS') || eColValue === 'XS(微型)') {
-              row[6] = 'CS04'; // 微型
             } else {
               row[6] = eColValue; // 其他情况保留原值
             }

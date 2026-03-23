@@ -640,11 +640,11 @@ export default function Home() {
                 <ul className="text-amber-800 dark:text-amber-300/80 space-y-1 list-disc list-inside">
                   <li>B列：填入企查查D列数据</li>
                   <li>C列：含"公司"填C01，不含填C02</li>
-                  <li>D列：V列数据→行业代码表A列匹配→填入B列内容</li>
-                  <li>E列：N列（为"-"时用M列）→行政区划代码表D列匹配→填入C列</li>
+                  <li>D列：V列行业名称→行业代码表匹配→填入代码</li>
+                  <li>E列：N/M列地区名称→行政区划表匹配→填入代码</li>
                   <li>F列：直接填入企查查T列内容</li>
                   <li>G列：直接填入企查查E列内容</li>
-                  <li>I列：H列内容→银行信息表A列匹配→填入B列内容</li>
+                  <li>I列：H列银行名称→银行信息表匹配→填入代码</li>
                   <li>L列：K列内容+随机4位数字，重复则在首行标注</li>
                 </ul>
               ) : (

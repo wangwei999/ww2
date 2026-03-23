@@ -51,9 +51,12 @@ export async function POST(request: NextRequest) {
     console.log(`企查查数据共 ${qichachaMap.size} 条记录`);
 
     // 读取报表字段文件
+    // 行业代码映射：行业名称 -> 代码（支持D列->E列和A列->B列两种映射）
     let industryCodeMap = new Map<string, any>();
-    let adminDivisionMap = new Map<string, { cValue: any; cValueNextRow: any }>();
-    let adminDivisionData: any[][] = [];
+    // 行政区划映射：地区名称 -> 代码（支持A列->B列和G列->D/E/F/H列映射）
+    let adminDivisionMapByName = new Map<string, any>();
+    let adminDivisionMapByCode = new Map<string, any>();
+    // 银行信息映射：银行名称 -> 代码（D列->E列）
     let bankInfoMap = new Map<string, any>();
     
     if (reportFieldsFile) {
@@ -69,14 +72,27 @@ export async function POST(request: NextRequest) {
         const industryCodeSheet = reportFieldsWorkbook.Sheets[industryCodeSheetName];
         const industryCodeData = XLSX.utils.sheet_to_json(industryCodeSheet, { header: 1 }) as any[][];
         
-        // 构建"行业代码"映射：A列 -> B列
+        // 构建"行业代码"映射
+        // 方式1：D列行业名称 -> E列代码（主要）
+        // 方式2：A列行业名称 -> B列代码（备选）
         for (let i = 0; i < industryCodeData.length; i++) {
           const row = industryCodeData[i];
-          if (row && row[0]) {
-            const code = String(row[0]).trim();
-            const name = row[1]; // B列（索引1）
-            if (code) {
-              industryCodeMap.set(code, name);
+          if (row) {
+            // D列 -> E列（行业名称 -> 代码）
+            if (row[3]) {
+              const industryName = String(row[3]).trim();
+              const industryCode = row[4]; // E列
+              if (industryName && industryCode) {
+                industryCodeMap.set(industryName, industryCode);
+              }
+            }
+            // A列 -> B列（备选）
+            if (row[0]) {
+              const industryName = String(row[0]).trim();
+              const industryCode = row[1]; // B列
+              if (industryName && industryCode) {
+                industryCodeMap.set(industryName, industryCode);
+              }
             }
           }
         }
@@ -92,24 +108,40 @@ export async function POST(request: NextRequest) {
       
       if (adminDivisionSheetName) {
         const adminDivisionSheet = reportFieldsWorkbook.Sheets[adminDivisionSheetName];
-        adminDivisionData = XLSX.utils.sheet_to_json(adminDivisionSheet, { header: 1 }) as any[][];
+        const adminDivisionData = XLSX.utils.sheet_to_json(adminDivisionSheet, { header: 1 }) as any[][];
         
-        // 构建"行政区划代码"映射：D列 -> { C列值, C列下一行值 }
+        // 构建"行政区划代码"映射
         for (let i = 0; i < adminDivisionData.length; i++) {
           const row = adminDivisionData[i];
-          if (row && row[3]) { // D列（索引3）
-            const dValue = String(row[3]).trim();
-            const cValue = row[2]; // C列（索引2）
-            // 获取下一行C列的值
-            const cValueNextRow = (i + 1 < adminDivisionData.length && adminDivisionData[i + 1]) 
-              ? adminDivisionData[i + 1][2] 
-              : null;
-            if (dValue) {
-              adminDivisionMap.set(dValue, { cValue, cValueNextRow });
+          if (row) {
+            // A列区县名称 -> B列区县代码
+            if (row[0]) {
+              const areaName = String(row[0]).trim();
+              const areaCode = row[1]; // B列
+              if (areaName && areaCode) {
+                adminDivisionMapByName.set(areaName, areaCode);
+              }
+            }
+            // G列名称 -> D/E/F列代码（优先取最细粒度的代码）
+            if (row[6]) {
+              const areaName = String(row[6]).trim();
+              // 优先取F列（三级分类），其次E列（二级分类），最后D列（一级分类）
+              const areaCode = row[5] || row[4] || row[3]; // F列 > E列 > D列
+              if (areaName && areaCode) {
+                adminDivisionMapByName.set(areaName, areaCode);
+              }
+            }
+            // D列代码 -> 对应名称（用于代码反向查找）
+            if (row[3]) {
+              const code = String(row[3]).trim();
+              const name = row[6] || row[0]; // G列或A列
+              if (code) {
+                adminDivisionMapByCode.set(code, name);
+              }
             }
           }
         }
-        console.log(`行政区划代码映射共 ${adminDivisionMap.size} 条记录`);
+        console.log(`行政区划代码映射共 ${adminDivisionMapByName.size} 条记录`);
       } else {
         console.log('未找到"行政区划代码"工作表');
       }
@@ -123,14 +155,26 @@ export async function POST(request: NextRequest) {
         const bankInfoSheet = reportFieldsWorkbook.Sheets[bankInfoSheetName];
         const bankInfoData = XLSX.utils.sheet_to_json(bankInfoSheet, { header: 1 }) as any[][];
         
-        // 构建"银行信息"映射：A列 -> B列
+        // 构建"银行信息"映射
+        // D列银行名称 -> E列银行代码
         for (let i = 0; i < bankInfoData.length; i++) {
           const row = bankInfoData[i];
-          if (row && row[0]) {
-            const bankName = String(row[0]).trim();
-            const bankValue = row[1]; // B列（索引1）
-            if (bankName) {
-              bankInfoMap.set(bankName, bankValue);
+          if (row) {
+            // D列 -> E列
+            if (row[3]) {
+              const bankName = String(row[3]).trim();
+              const bankCode = row[4]; // E列
+              if (bankName && bankCode) {
+                bankInfoMap.set(bankName, bankCode);
+              }
+            }
+            // A列 -> B列（备选）
+            if (row[0]) {
+              const bankName = String(row[0]).trim();
+              const bankCode = row[1]; // B列
+              if (bankName && bankCode) {
+                bankInfoMap.set(bankName, bankCode);
+              }
             }
           }
         }
@@ -169,15 +213,18 @@ export async function POST(request: NextRequest) {
             c02Count++;
           }
           
-          // 在D列（索引3）先填入企查查V列数据
+          // 在D列（索引3）处理行业代码
+          // V列值是行业名称，匹配行业代码表D列，取E列代码
           const vValue = qichachaRow.vValue ? String(qichachaRow.vValue).trim() : '';
           
-          // 再用D列值与"行业代码"表A列匹配，如果匹配成功则替换为B列内容
-          if (vValue && vValue !== '-' && industryCodeMap.has(vValue)) {
-            row[3] = industryCodeMap.get(vValue);
-            industryMatchCount++;
-          } else if (vValue && vValue !== '-') {
-            row[3] = vValue;
+          if (vValue && vValue !== '-') {
+            // 用行业名称匹配行业代码表
+            if (industryCodeMap.has(vValue)) {
+              row[3] = industryCodeMap.get(vValue);
+              industryMatchCount++;
+            } else {
+              row[3] = vValue; // 未匹配则保留原值
+            }
           } else {
             row[3] = '-';
           }
@@ -194,20 +241,14 @@ export async function POST(request: NextRequest) {
             eValue = nValue;
           }
           
-          // 再用E列值与"行政区划代码"表D列匹配
-          if (eValue && eValue !== '-' && adminDivisionMap.has(eValue)) {
-            const adminData = adminDivisionMap.get(eValue)!;
-            // 如果C列有数据，用C列内容；否则用C列下一行数据
-            if (adminData.cValue !== null && adminData.cValue !== undefined && adminData.cValue !== '') {
-              row[4] = adminData.cValue;
-            } else if (adminData.cValueNextRow !== null && adminData.cValueNextRow !== undefined) {
-              row[4] = adminData.cValueNextRow;
+          // 用地区名称匹配行政区划代码表
+          if (eValue && eValue !== '-') {
+            if (adminDivisionMapByName.has(eValue)) {
+              row[4] = adminDivisionMapByName.get(eValue);
+              adminDivisionMatchCount++;
             } else {
-              row[4] = eValue; // 都没有则保留原值
+              row[4] = eValue; // 未匹配则保留原值
             }
-            adminDivisionMatchCount++;
-          } else if (eValue && eValue !== '-') {
-            row[4] = eValue;
           } else {
             row[4] = '-';
           }
@@ -222,11 +263,15 @@ export async function POST(request: NextRequest) {
         }
         
         // 在I列（索引8）处理银行信息匹配（独立匹配，不依赖企查查）
-        // 将企业名称表H列（索引7）内容与银行信息表A列匹配
+        // 将企业名称表H列（索引7）内容与银行信息表D列匹配，取E列代码
         const hValue = row[7] ? String(row[7]).trim() : '';
-        if (hValue && hValue !== '-' && bankInfoMap.has(hValue)) {
-          row[8] = bankInfoMap.get(hValue);
-          bankMatchCount++;
+        if (hValue && hValue !== '-') {
+          if (bankInfoMap.has(hValue)) {
+            row[8] = bankInfoMap.get(hValue);
+            bankMatchCount++;
+          } else {
+            row[8] = '-'; // 未匹配
+          }
         } else {
           row[8] = '-';
         }

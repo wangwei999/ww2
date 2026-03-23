@@ -281,8 +281,20 @@ export async function POST(request: NextRequest) {
         // 将企业名称表H列（索引7）内容与银行信息表D列匹配，取E列代码
         const hValue = row[7] ? String(row[7]).trim() : '';
         if (hValue && hValue !== '-') {
-          if (bankInfoMap.has(hValue)) {
-            row[8] = bankInfoMap.get(hValue);
+          // 标准化银行名称：把"XX银行XXXXX"或"XX银行"改成"XX银行股份有限公司"
+          let normalizedBankName = hValue;
+          
+          // 如果不是以"股份有限公司"结尾，则进行标准化
+          if (!normalizedBankName.endsWith('股份有限公司')) {
+            // 匹配"XX银行"开头或以"XX银行"结尾的情况
+            const bankMatch = normalizedBankName.match(/^(.+?银行)/);
+            if (bankMatch) {
+              normalizedBankName = bankMatch[1] + '股份有限公司';
+            }
+          }
+          
+          if (bankInfoMap.has(normalizedBankName)) {
+            row[8] = bankInfoMap.get(normalizedBankName);
             bankMatchCount++;
           } else {
             row[8] = '-'; // 未匹配

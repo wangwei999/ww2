@@ -11,7 +11,7 @@ const TEMP_DIR = '/tmp/pdf-images';
 /**
  * PDF模式处理器
  * 用于识别PDF中的表格数据并填充到Excel文件中
- * 使用 pdftoppm (poppler-utils) 将 PDF 转换为图片
+ * 使用 Python PyMuPDF 将 PDF 转换为图片
  */
 export class PDFMatcher {
   private pdfFile: File | Buffer;
@@ -279,25 +279,25 @@ export class PDFMatcher {
     console.log('正在将PDF转换为图片...');
 
     try {
-      // 检查pdftoppm是否可用
-      try {
-        execSync('which pdftoppm', { timeout: 5000 });
-      } catch (e) {
-        throw new Error('系统工具pdftoppm未安装，请联系管理员安装poppler-utils');
+      // 获取脚本路径
+      const scriptPath = path.join(process.cwd(), 'scripts', 'pdf_to_png.py');
+      
+      // 检查Python脚本是否存在
+      if (!existsSync(scriptPath)) {
+        throw new Error('PDF转换脚本不存在，请联系管理员');
       }
 
-      // 使用 pdftoppm 将 PDF 转换为 PNG 图片
-      const outputPrefix = `${sessionDir}/page`;
-      console.log(`执行命令: pdftoppm -png -r 200 "${pdfPath}" "${outputPrefix}"`);
+      // 使用 Python PyMuPDF 将 PDF 转换为 PNG 图片
+      console.log(`执行命令: python3 "${scriptPath}" "${pdfPath}" "${sessionDir}"`);
       
       try {
-        const result = execSync(`pdftoppm -png -r 200 "${pdfPath}" "${outputPrefix}"`, {
+        const result = execSync(`python3 "${scriptPath}" "${pdfPath}" "${sessionDir}"`, {
           timeout: 60000, // 60秒超时
           encoding: 'utf-8',
         });
-        console.log('pdftoppm命令执行成功');
+        console.log('PDF转换成功:', result);
       } catch (cmdError: any) {
-        console.error('pdftoppm命令执行失败:', cmdError.message);
+        console.error('PDF转换命令执行失败:', cmdError.message);
         console.error('错误详情:', cmdError.stderr || cmdError.stdout);
         throw new Error(`PDF转换失败: ${cmdError.message}`);
       }
@@ -415,8 +415,8 @@ export class PDFMatcher {
       // 提供更详细的错误信息
       let errorMessage = 'PDF文件转换失败';
       
-      if (error.message.includes('pdftoppm未安装')) {
-        errorMessage = '系统工具pdftoppm未安装，请联系管理员安装poppler-utils';
+      if (error.message.includes('PDF转换脚本不存在')) {
+        errorMessage = 'PDF转换脚本不存在，请联系管理员';
       } else if (error.message.includes('PDF转换失败')) {
         errorMessage = error.message;
       } else if (error.message.includes('timeout')) {

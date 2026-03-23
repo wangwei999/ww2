@@ -537,7 +537,7 @@ export default function Home() {
               <li>✓ D列：企查查V列→行业代码转换</li>
               <li>✓ E列：企查查N/M列→行政区划转换</li>
               <li>✓ F列：企查查T列数据</li>
-              <li>✓ G列：企查查E列数据</li>
+              <li>✓ G列：企业规模转换代码</li>
               <li>✓ I列：H列→银行信息转换</li>
               <li>✓ L列：K列+随机4位数</li>
             </ul>
@@ -643,7 +643,7 @@ export default function Home() {
                   <li>D列：V列行业名称→行业代码表匹配→填入代码</li>
                   <li>E列：N/M列地区名称→行政区划表匹配→填入代码</li>
                   <li>F列：直接填入企查查T列内容</li>
-                  <li>G列：直接填入企查查E列内容</li>
+                  <li>G列：L(大型)→CS01，M(中型)→CS02，S(小型)→CS03，XS(微型)→CS04</li>
                   <li>I列：H列银行名称→银行信息表匹配→填入代码</li>
                   <li>L列：K列内容+随机4位数字，重复则在首行标注</li>
                 </ul>

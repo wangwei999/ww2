@@ -257,9 +257,24 @@ export async function POST(request: NextRequest) {
           row[5] = qichachaRow.tValue !== null && qichachaRow.tValue !== undefined && qichachaRow.tValue !== '' 
             ? qichachaRow.tValue : '-';
           
-          // 在G列（索引6）填入企查查E列内容，为空则填入"-"
-          row[6] = qichachaRow.eValue !== null && qichachaRow.eValue !== undefined && qichachaRow.eValue !== '' 
-            ? qichachaRow.eValue : '-';
+          // 在G列（索引6）根据企查查E列内容转换企业规模代码
+          const eColValue = qichachaRow.eValue ? String(qichachaRow.eValue).trim() : '';
+          if (eColValue && eColValue !== '-') {
+            // 根据企业规模转换代码
+            if (eColValue.includes('S') || eColValue === 'S(小型)') {
+              row[6] = 'CS03'; // 小型
+            } else if (eColValue.includes('M') || eColValue === 'M(中型)') {
+              row[6] = 'CS02'; // 中型
+            } else if (eColValue.includes('L') || eColValue === 'L(大型)') {
+              row[6] = 'CS01'; // 大型
+            } else if (eColValue.includes('XS') || eColValue === 'XS(微型)') {
+              row[6] = 'CS04'; // 微型
+            } else {
+              row[6] = eColValue; // 其他情况保留原值
+            }
+          } else {
+            row[6] = '-';
+          }
         }
         
         // 在I列（索引8）处理银行信息匹配（独立匹配，不依赖企查查）

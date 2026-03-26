@@ -139,9 +139,51 @@ export default function Home() {
   };
 
   // 挑券模式文件处理
-  const handleCouponFileChange = (file: File | null) => {
+  const handleCouponFileChange = async (file: File | null) => {
     setCouponFile(file);
-
+    
+    // 上传文件后自动生成副本并下载
+    if (file) {
+      try {
+        console.log('开始生成债券分类副本...');
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch('/api/coupon-copy', {
+          method: 'POST',
+          body: formData
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || '生成副本失败');
+        }
+        
+        // 获取统计信息
+        const statistics = response.headers.get('X-Statistics');
+        if (statistics) {
+          const stats = JSON.parse(statistics);
+          console.log('债券分类统计:', stats);
+        }
+        
+        // 下载文件
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `债券分类_${new Date().getMonth() + 1}${new Date().getDate()}.xlsx`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        
+        toast.success('债券分类副本已生成并下载');
+      } catch (error) {
+        console.error('生成副本失败:', error);
+        toast.error(error instanceof Error ? error.message : '生成副本失败');
+      }
+    }
   };
 
   const handleCouponAmountChange = (value: string) => {

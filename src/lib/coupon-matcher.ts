@@ -129,7 +129,7 @@ export class CouponMatcher {
    * - 纯数字：代码精确匹配（全局）
    * - 文字：名称模糊匹配（全局）
    * - /1国开：第1笔金额禁挑名称包含"国开"的债券
-   * - /22071117：第2笔金额禁挑代码为"2071117"的债券
+   * - /2250206：第2笔金额禁挑代码为"250206"的债券
    */
   private parseExclusionRules(): void {
     this.exclusionRules = [];
@@ -138,8 +138,8 @@ export class CouponMatcher {
       const trimmed = item.trim();
       if (!trimmed) continue;
       
-      // 检查是否有 /数字 前缀
-      const groupMatch = trimmed.match(/^\/(\d+)(.+)$/);
+      // 检查是否有 /数字 前缀（序号只取1位数字，支持1-9）
+      const groupMatch = trimmed.match(/^\/([1-9])(.+)$/);
       
       if (groupMatch) {
         // 带金额序号的禁挑券

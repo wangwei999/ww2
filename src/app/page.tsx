@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Upload, FileSpreadsheet, Download, Loader2, CheckCircle, AlertCircle, X, FileText, Ticket } from 'lucide-react';
+import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertCircle, X, FileText, Ticket } from 'lucide-react';
 import { toast } from 'sonner';
 
 type ProcessMode = 'coupon' | 'normal' | 'credit' | 'pdf' | 'basic';
@@ -103,65 +103,45 @@ export default function Home() {
   const [excludedBonds, setExcludedBonds] = useState<string>(''); // 禁挑券
   
   const [processing, setProcessing] = useState(false);
-  const [downloading, setDownloading] = useState(false);
-  const [hasProcessedFile, setHasProcessedFile] = useState(false);
-
-  // 客户端加载时检查是否有已处理的文件
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const fileId = sessionStorage.getItem('processedFileId');
-      setHasProcessedFile(!!fileId);
-    }
-  }, []);
-
-  // 清空处理状态
-  const clearProcessedState = () => {
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem('processedFileId');
-      setHasProcessedFile(false);
-    }
-  };
 
   const handleFileAChange = (file: File | null) => {
     setFileA(file);
-    clearProcessedState();
   };
 
   const handleFileBChange = (file: File | null) => {
     setFileB(file);
-    clearProcessedState();
   };
 
   const handlePdfFileChange = (file: File | null) => {
     setPdfFile(file);
-    clearProcessedState();
+
   };
 
   const handleExcelFileChange = (file: File | null) => {
     setExcelFile(file);
-    clearProcessedState();
+
   };
 
   // 基础数据模式文件处理
   const handleEnterpriseNameFileChange = (file: File | null) => {
     setEnterpriseNameFile(file);
-    clearProcessedState();
+
   };
 
   const handleQichachaDataFileChange = (file: File | null) => {
     setQichachaDataFile(file);
-    clearProcessedState();
+
   };
 
   const handleReportFieldsFileChange = (file: File | null) => {
     setReportFieldsFile(file);
-    clearProcessedState();
+
   };
 
   // 挑券模式文件处理
   const handleCouponFileChange = (file: File | null) => {
     setCouponFile(file);
-    clearProcessedState();
+
   };
 
   const handleCouponAmountChange = (value: string) => {
@@ -189,7 +169,7 @@ export default function Home() {
 
   const handleModeChange = (newMode: ProcessMode) => {
     setMode(newMode);
-    clearProcessedState();
+
   };
 
   const handleProcess = async () => {
@@ -411,51 +391,27 @@ export default function Home() {
         throw new Error('未获取到文件ID');
       }
       
-      // 保存文件ID以便后续下载
-      if (typeof window !== 'undefined') {
-        sessionStorage.setItem('processedFileId', data.fileId);
-        setHasProcessedFile(true);
+      // 自动下载文件
+      const downloadResponse = await fetch(`/api/download?fileId=${data.fileId}`);
+      if (!downloadResponse.ok) {
+        throw new Error('下载文件失败');
       }
+
+      const blob = await downloadResponse.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = data.fileId;
+      link.click();
+      window.URL.revokeObjectURL(url);
       
-      toast.success(`数据处理完成！共填充 ${data.statistics?.totalFilled || 0} 个单元格`);
+      toast.success(`${data.message || '处理完成'}！共填充 ${data.statistics?.totalFilled || 0} 个单元格`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '处理失败，请重试';
       toast.error(errorMessage);
       console.error('处理错误:', error);
     } finally {
       setProcessing(false);
-    }
-  };
-
-  const handleDownload = async () => {
-    if (typeof window === 'undefined') return;
-    
-    const fileId = sessionStorage.getItem('processedFileId');
-    if (!fileId) {
-      toast.error('没有可下载的文件');
-      return;
-    }
-
-    setDownloading(true);
-    
-    try {
-      const response = await fetch(`/api/download?fileId=${fileId}`);
-      if (!response.ok) throw new Error('下载失败');
-
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `填充结果_${fileB?.name || '结果.xlsx'}`;
-      link.click();
-      window.URL.revokeObjectURL(url);
-      
-      toast.success('下载成功！');
-    } catch (error) {
-      toast.error('下载失败，请重试');
-      console.error(error);
-    } finally {
-      setDownloading(false);
     }
   };
 
@@ -691,12 +647,6 @@ export default function Home() {
     return !fileA || !fileB;
   };
 
-  // 获取下载按钮是否禁用（挑券模式、授信写入模式和基础数据模式直接下载，不需要下载按钮）
-  const isDownloadDisabled = () => {
-    if (mode === 'coupon' || mode === 'pdf' || mode === 'basic') return true;
-    return downloading || !hasProcessedFile;
-  };
-
   // 获取处理按钮文本
   const getProcessButtonText = () => {
     if (processing) return '处理中...';
@@ -843,40 +793,6 @@ export default function Home() {
             {getProcessButtonIcon()}
             {getProcessButtonText()}
           </Button>
-
-          {mode !== 'coupon' && mode !== 'pdf' && mode !== 'basic' && (
-            <div className="flex flex-col items-center gap-2">
-              <Button
-                onClick={handleDownload}
-                disabled={isDownloadDisabled()}
-                variant="outline"
-                size="lg"
-                className="min-w-[180px]"
-              >
-                {downloading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    下载中...
-                  </>
-                ) : hasProcessedFile ? (
-                  <>
-                    <Download className="mr-2 h-4 w-4" />
-                    下载结果
-                  </>
-                ) : (
-                  <>
-                    <Download className="mr-2 h-4 w-4" />
-                    等待处理
-                  </>
-                )}
-              </Button>
-              {!hasProcessedFile && (
-                <p className="text-xs text-muted-foreground">
-                  请先上传文件并点击"开始处理"
-                </p>
-              )}
-            </div>
-          )}
         </div>
 
         {/* 注意事项 */}

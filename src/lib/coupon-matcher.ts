@@ -5,17 +5,23 @@ import { containsGeographyKeyword } from './geo-keywords';
  * 债券数据结构
  */
 interface BondData {
-  rowNumber: number;       // 行号
+  rowNumber: number;       // 原始行号
   bondName: string;        // 债券名称（C列）
   availableAmount: number; // 可用金额（E列，万元）
   selectedAmount: number;  // 挑券金额（计算得出）
-  // 其他列数据
-  [key: string]: any;
+  rowData: any[];          // 整行数据
 }
 
 /**
  * 挑券模式处理器
  * 完全独立于其他功能模块
+ * 
+ * Excel结构说明：
+ * - 第1-7行：其他内容（标题、说明等）
+ * - 第8行：字段列名（表头）
+ * - 第9行开始：债券数据
+ * - C列：债券名称
+ * - E列：可用金额
  */
 export class CouponMatcher {
   private file: File | Buffer;
@@ -24,21 +30,25 @@ export class CouponMatcher {
   private workbook: ExcelJS.Workbook;
   private worksheet: ExcelJS.Worksheet | null = null;
 
+  // Excel结构常量
+  private readonly HEADER_ROW = 8;      // 表头行号
+  private readonly DATA_START_ROW = 9;  // 数据起始行号
+  private readonly BOND_NAME_COL = 3;   // C列 - 债券名称
+  private readonly AVAILABLE_COL = 5;   // E列 - 可用金额
+
   // 债券数据列表
   private bonds: BondData[] = [];
 
   // 处理结果
   private result: {
-    bondType: 'treasury' | 'local'; // 实际判断的债券类型
+    bondType: 'treasury' | 'local';
     totalRows: number;
-    filteredRows: number;
     totalAvailable: number;
     totalSelected: number;
     selectedBonds: BondData[];
   } = {
     bondType: 'treasury',
     totalRows: 0,
-    filteredRows: 0,
     totalAvailable: 0,
     totalSelected: 0,
     selectedBonds: []
@@ -69,7 +79,7 @@ export class CouponMatcher {
     // 1. 加载Excel文件
     await this.loadExcelFile();
 
-    // 2. 读取债券数据
+    // 2. 读取债券数据（从第9行开始）
     this.readBondData();
 
     // 3. 判断债券类型（如果用户选择地方债）
@@ -99,7 +109,6 @@ export class CouponMatcher {
       statistics: {
         bondType: this.result.bondType,
         totalRows: this.result.totalRows,
-        filteredRows: this.result.filteredRows,
         totalAvailable: this.result.totalAvailable,
         totalSelected: this.result.totalSelected,
         selectedCount: this.result.selectedBonds.length,
@@ -134,32 +143,41 @@ export class CouponMatcher {
 
   /**
    * 读取债券数据
+   * 从第9行开始读取（第8行是表头）
    */
   private readBondData(): void {
-    console.log('读取债券数据...');
+    console.log('读取债券数据（从第9行开始）...');
 
     if (!this.worksheet) return;
 
-    // 从第2行开始读取（跳过表头）
-    this.worksheet.eachRow((row, rowNumber) => {
-      if (rowNumber === 1) return; // 跳过表头
+    const rowCount = this.worksheet.rowCount;
+    console.log('工作表总行数:', rowCount);
 
-      // 读取C列（债券名称）和E列（可用金额）
-      const cellC = row.getCell(3);
-      const cellE = row.getCell(5);
+    // 从第9行开始读取数据
+    for (let rowNumber = this.DATA_START_ROW; rowNumber <= rowCount; rowNumber++) {
+      const row = this.worksheet.getRow(rowNumber);
       
-      const bondName = String(cellC.value || '').trim();
-      const availableAmount = parseFloat(String(cellE.value || '0').replace(/,/g, ''));
+      // 读取C列（债券名称）和E列（可用金额）
+      const bondName = String(row.getCell(this.BOND_NAME_COL).value || '').trim();
+      const availableAmountStr = String(row.getCell(this.AVAILABLE_COL).value || '0').replace(/,/g, '');
+      const availableAmount = parseFloat(availableAmountStr);
 
       if (bondName && availableAmount > 0) {
+        // 保存整行数据
+        const rowData: any[] = [];
+        row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+          rowData[colNumber - 1] = cell.value;
+        });
+
         this.bonds.push({
           rowNumber,
           bondName,
           availableAmount,
-          selectedAmount: 0
+          selectedAmount: 0,
+          rowData
         });
       }
-    });
+    }
 
     console.log(`读取到 ${this.bonds.length} 条债券数据`);
     this.result.totalRows = this.bonds.length;
@@ -173,10 +191,8 @@ export class CouponMatcher {
     console.log('判断债券类型（读取C列）...');
 
     let hasGeographyKeyword = false;
-    let checkedRows = 0;
 
     for (const bond of this.bonds) {
-      checkedRows++;
       if (containsGeographyKeyword(bond.bondName)) {
         hasGeographyKeyword = true;
         console.log(`  "${bond.bondName}" 包含地理名词`);
@@ -184,7 +200,7 @@ export class CouponMatcher {
     }
 
     this.result.bondType = hasGeographyKeyword ? 'local' : 'treasury';
-    console.log(`检查了 ${checkedRows} 行，包含地理名词: ${hasGeographyKeyword}`);
+    console.log(`检查了 ${this.bonds.length} 行，包含地理名词: ${hasGeographyKeyword}`);
   }
 
   /**
@@ -226,55 +242,38 @@ export class CouponMatcher {
 
       if (bond.availableAmount <= remainingAmount) {
         // 当前债券可用金额 <= 剩余挑券金额
-        // 可以挑全部或部分
         const afterSelect = remainingAvailable - bond.availableAmount;
         
         if (afterSelect >= this.MIN_OCCUPY_AMOUNT || afterSelect === 0) {
-          // 挑完后剩余的金额足够满足最小占用要求，或者没有剩余了
-          // 可以挑这个债券的全部金额
           selectAmount = bond.availableAmount;
         } else {
-          // 需要给后续债券留够最小占用金额
-          // 这个债券只能挑：可用金额 - 最小占用金额
           selectAmount = bond.availableAmount - this.MIN_OCCUPY_AMOUNT;
           if (selectAmount < this.MIN_OCCUPY_AMOUNT) {
-            // 如果挑完连最小占用都不够，就跳过这个债券
             continue;
           }
         }
       } else {
         // 当前债券可用金额 > 剩余挑券金额
-        // 只需要挑剩余的金额
         selectAmount = remainingAmount;
         
-        // 检查挑完后剩余金额是否满足最小占用要求
         const leftover = bond.availableAmount - selectAmount;
         if (leftover > 0 && leftover < this.MIN_OCCUPY_AMOUNT) {
-          // 剩余金额不足最小占用，需要调整
-          // 方案1：多挑一点，让剩余为0
-          // 方案2：少挑一点，让剩余>=100万
           if (remainingAmount === this.amount) {
-            // 这是第一个债券，可以多挑
             selectAmount = bond.availableAmount;
           } else {
-            // 不是第一个债券，需要确保之前的债券已经挑了
-            // 这种情况下，跳过当前债券，尝试下一个
             continue;
           }
         }
       }
 
-      // 确保挑券金额不超过剩余需要挑的金额
       if (selectAmount > remainingAmount) {
         selectAmount = remainingAmount;
       }
 
-      // 确保挑券金额 >= 最小占用金额（除非是最后一个债券且金额不足）
       if (selectAmount < this.MIN_OCCUPY_AMOUNT && remainingAmount >= this.MIN_OCCUPY_AMOUNT) {
         continue;
       }
 
-      // 应用选择
       if (selectAmount > 0) {
         bond.selectedAmount = selectAmount;
         selectedBonds.push(bond);
@@ -286,7 +285,6 @@ export class CouponMatcher {
 
     this.result.selectedBonds = selectedBonds;
     this.result.totalSelected = this.amount - remainingAmount;
-    this.result.filteredRows = selectedBonds.length;
 
     if (remainingAmount > 0) {
       console.warn(`警告：未能完全匹配，还剩 ${remainingAmount} 万元未挑`);
@@ -295,6 +293,9 @@ export class CouponMatcher {
 
   /**
    * 生成结果Excel
+   * 1. F列插入"挑券金额（万元）"，原F列及后面的列往右移
+   * 2. 债券按E列可用金额从大到小排序
+   * 3. F列第7行显示挑券完成后的总金额
    */
   private async generateResultWorkbook(): Promise<void> {
     console.log('生成结果Excel...');
@@ -303,34 +304,97 @@ export class CouponMatcher {
 
     // 创建新的工作簿
     const resultWorkbook = new ExcelJS.Workbook();
-    const resultSheet = resultWorkbook.addWorksheet('挑券结果');
+    const resultSheet = resultWorkbook.addWorksheet(this.worksheet.name);
 
-    // 复制表头
-    const headerRow = this.worksheet.getRow(1);
-    const newHeaderRow = resultSheet.getRow(1);
-    headerRow.eachCell((cell, colNumber) => {
-      newHeaderRow.getCell(colNumber).value = cell.value;
-    });
-
-    // 添加"挑券金额"列
-    const lastCol = headerRow.cellCount + 1;
-    newHeaderRow.getCell(lastCol).value = '挑券金额（万元）';
-    newHeaderRow.commit();
-
-    // 复制选中的债券数据
-    for (const bond of this.result.selectedBonds) {
-      const sourceRow = this.worksheet.getRow(bond.rowNumber);
-      const newRow = resultSheet.addRow([]);
+    // 复制第1-7行（保持原样，但要插入F列）
+    for (let rowNumber = 1; rowNumber < this.HEADER_ROW; rowNumber++) {
+      const sourceRow = this.worksheet.getRow(rowNumber);
+      const newRow = resultSheet.getRow(rowNumber);
       
-      sourceRow.eachCell((cell, colNumber) => {
-        newRow.getCell(colNumber).value = cell.value;
+      sourceRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        if (colNumber < this.AVAILABLE_COL + 1) {
+          // A-E列直接复制
+          newRow.getCell(colNumber).value = cell.value;
+          this.copyCellStyle(cell, newRow.getCell(colNumber));
+        } else {
+          // F列及后面的列往右移一格
+          newRow.getCell(colNumber + 1).value = cell.value;
+          this.copyCellStyle(cell, newRow.getCell(colNumber + 1));
+        }
       });
       
-      // 添加挑券金额
-      newRow.getCell(lastCol).value = bond.selectedAmount;
+      // F列第7行显示挑券总金额
+      if (rowNumber === 7) {
+        newRow.getCell(this.AVAILABLE_COL + 1).value = this.result.totalSelected;
+        console.log(`F列第7行设置挑券总金额: ${this.result.totalSelected}万元`);
+      }
+      
+      newRow.commit();
     }
 
-    // 更新工作簿引用
+    // 复制第8行（表头行），插入"挑券金额（万元）"列
+    const sourceHeaderRow = this.worksheet.getRow(this.HEADER_ROW);
+    const newHeaderRow = resultSheet.getRow(this.HEADER_ROW);
+    
+    sourceHeaderRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      if (colNumber < this.AVAILABLE_COL + 1) {
+        newHeaderRow.getCell(colNumber).value = cell.value;
+        this.copyCellStyle(cell, newHeaderRow.getCell(colNumber));
+      } else {
+        newHeaderRow.getCell(colNumber + 1).value = cell.value;
+        this.copyCellStyle(cell, newHeaderRow.getCell(colNumber + 1));
+      }
+    });
+    
+    // F列插入"挑券金额（万元）"
+    newHeaderRow.getCell(this.AVAILABLE_COL + 1).value = '挑券金额（万元）';
+    newHeaderRow.commit();
+
+    // 按可用金额从大到小排序选中的债券，写入数据行
+    const sortedBonds = [...this.result.selectedBonds].sort((a, b) => b.availableAmount - a.availableAmount);
+    
+    for (let i = 0; i < sortedBonds.length; i++) {
+      const bond = sortedBonds[i];
+      const newRowNumber = this.DATA_START_ROW + i;
+      const newRow = resultSheet.getRow(newRowNumber);
+      
+      // 复制原数据（A-E列）
+      for (let colIndex = 0; colIndex < bond.rowData.length; colIndex++) {
+        const colNumber = colIndex + 1;
+        if (colNumber < this.AVAILABLE_COL + 1) {
+          newRow.getCell(colNumber).value = bond.rowData[colIndex];
+        } else if (colNumber === this.AVAILABLE_COL) {
+          // E列
+          newRow.getCell(colNumber).value = bond.availableAmount;
+        }
+      }
+      
+      // F列：挑券金额
+      newRow.getCell(this.AVAILABLE_COL + 1).value = bond.selectedAmount;
+      
+      // G列及之后：原F列及之后的数据
+      for (let colIndex = this.AVAILABLE_COL; colIndex < bond.rowData.length; colIndex++) {
+        newRow.getCell(colIndex + 2).value = bond.rowData[colIndex];
+      }
+      
+      newRow.commit();
+    }
+
     this.workbook = resultWorkbook;
+  }
+
+  /**
+   * 复制单元格样式
+   */
+  private copyCellStyle(sourceCell: ExcelJS.Cell, targetCell: ExcelJS.Cell): void {
+    try {
+      if (sourceCell.font) targetCell.font = { ...sourceCell.font };
+      if (sourceCell.fill) targetCell.fill = { ...sourceCell.fill };
+      if (sourceCell.border) targetCell.border = { ...sourceCell.border };
+      if (sourceCell.alignment) targetCell.alignment = { ...sourceCell.alignment };
+      if (sourceCell.numFmt) targetCell.numFmt = sourceCell.numFmt;
+    } catch (e) {
+      // 忽略样式复制错误
+    }
   }
 }

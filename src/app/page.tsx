@@ -164,11 +164,26 @@ export default function Home() {
   };
 
   const handleCouponAmountChange = (value: string) => {
-    // 只允许输入数字和小数点
-    const regex = /^[0-9]*\.?[0-9]*$/;
-    if (value === '' || regex.test(value)) {
-      setCouponAmount(value);
+    // 支持多金额输入，用逗号、空格或换行分隔
+    setCouponAmount(value);
+  };
+
+  // 解析多金额输入
+  const parseAmounts = (value: string): number[] => {
+    if (!value.trim()) return [];
+    
+    // 按逗号、空格、换行分隔
+    const parts = value.split(/[,\s\n]+/).filter(s => s.trim() !== '');
+    
+    const amounts: number[] = [];
+    for (const part of parts) {
+      const num = parseFloat(part.trim());
+      if (!isNaN(num) && num > 0) {
+        amounts.push(num);
+      }
     }
+    
+    return amounts;
   };
 
   const handleModeChange = (newMode: ProcessMode) => {
@@ -184,7 +199,8 @@ export default function Home() {
         return;
       }
 
-      if (!couponAmount || parseFloat(couponAmount) <= 0) {
+      const amounts = parseAmounts(couponAmount);
+      if (amounts.length === 0) {
         toast.error('请输入有效的挑券金额');
         return;
       }
@@ -195,7 +211,8 @@ export default function Home() {
         const formData = new FormData();
         formData.append('file', couponFile);
         formData.append('bondType', bondType);
-        formData.append('amount', couponAmount);
+        // 发送多个金额，用逗号分隔
+        formData.append('amounts', amounts.join(','));
 
         const response = await fetch('/api/process-coupon', {
           method: 'POST',
@@ -491,19 +508,36 @@ export default function Home() {
               <div>
                 <Label className="text-base font-semibold">挑券金额</Label>
                 <p className="text-sm text-muted-foreground mt-1">
-                  输入需要筛选的债券金额
+                  支持输入多个金额，用逗号、空格或换行分隔（单位：万元）
                 </p>
               </div>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="text"
-                  placeholder="请输入金额"
-                  value={couponAmount}
-                  onChange={(e) => handleCouponAmountChange(e.target.value)}
-                  className="flex-1"
-                />
-                <span className="text-muted-foreground whitespace-nowrap">万元</span>
-              </div>
+              <textarea
+                placeholder="请输入金额，多个金额用逗号、空格或换行分隔&#10;例如：5000, 4000 或每行一个金额"
+                value={couponAmount}
+                onChange={(e) => handleCouponAmountChange(e.target.value)}
+                className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+              {/* 显示解析后的金额列表 */}
+              {couponAmount.trim() && (
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">已解析的金额列表：</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {parseAmounts(couponAmount).map((amount, index) => (
+                      <div
+                        key={index}
+                        className="px-3 py-1 bg-primary/10 text-primary rounded-full text-sm font-medium"
+                      >
+                        第{index + 1}笔: {amount.toLocaleString()}万元
+                      </div>
+                    ))}
+                  </div>
+                  {parseAmounts(couponAmount).length > 1 && (
+                    <p className="text-xs text-muted-foreground">
+                      共 {parseAmounts(couponAmount).length} 笔金额，合计 {parseAmounts(couponAmount).reduce((a, b) => a + b, 0).toLocaleString()} 万元
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </Card>
         </div>
@@ -587,7 +621,7 @@ export default function Home() {
   const isProcessDisabled = () => {
     if (processing) return true;
     if (mode === 'coupon') {
-      return !couponFile || !couponAmount || parseFloat(couponAmount) <= 0;
+      return !couponFile || parseAmounts(couponAmount).length === 0;
     }
     if (mode === 'pdf') {
       return !pdfFile || !excelFile;
@@ -702,7 +736,8 @@ export default function Home() {
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
               <li>✓ 支持国债和地方债筛选</li>
               <li>✓ 根据金额智能匹配债券</li>
-              <li>✓ 输出筛选结果Excel文件</li>
+              <li>✓ 支持多金额分批挑券</li>
+              <li>✓ 债券集合间自动隔离</li>
             </ul>
           ) : mode === 'pdf' ? (
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
@@ -796,7 +831,9 @@ export default function Home() {
                 <ul className="text-amber-800 dark:text-amber-300/80 space-y-1 list-disc list-inside">
                   <li>请确保上传的Excel文件包含债券数据</li>
                   <li>选择正确的债券类型（国债或地方债）</li>
-                  <li>输入挑券金额（单位：万元）后点击"开始挑券"</li>
+                  <li>支持输入多个挑券金额，用逗号、空格或换行分隔</li>
+                  <li>多金额模式下，每个金额对应的债券集合间会空一行隔离</li>
+                  <li>空行F列显示下一个债券集合的挑券金额</li>
                 </ul>
               ) : mode === 'pdf' ? (
                 <ul className="text-amber-800 dark:text-amber-300/80 space-y-1 list-disc list-inside">

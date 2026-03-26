@@ -4,13 +4,20 @@ import { CouponMatcher } from '@/lib/coupon-matcher';
 /**
  * 挑券功能API
  * 完全独立于其他功能模块
+ * 
+ * 支持单金额和多金额模式：
+ * - 单金额：传入 amount 参数
+ * - 多金额：传入 amounts 参数（逗号分隔）
  */
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File;
     const bondType = formData.get('bondType') as string;
-    const amount = formData.get('amount') as string;
+    
+    // 支持两种参数格式
+    const amountStr = formData.get('amount') as string;
+    const amountsStr = formData.get('amounts') as string;
 
     // 参数验证
     if (!file) {
@@ -27,7 +34,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!amount || parseFloat(amount) <= 0) {
+    // 解析金额
+    let amounts: number[] = [];
+    
+    if (amountsStr) {
+      // 多金额模式
+      amounts = amountsStr.split(',').map(s => parseFloat(s.trim())).filter(n => n > 0);
+    } else if (amountStr) {
+      // 单金额模式（兼容旧版）
+      const amount = parseFloat(amountStr);
+      if (amount > 0) {
+        amounts = [amount];
+      }
+    }
+
+    if (amounts.length === 0) {
       return NextResponse.json(
         { error: '请输入有效的挑券金额' },
         { status: 400 }
@@ -37,14 +58,15 @@ export async function POST(request: NextRequest) {
     console.log('挑券请求参数:', {
       fileName: file.name,
       bondType,
-      amount: parseFloat(amount),
+      amounts,
+      mode: amounts.length > 1 ? '多金额' : '单金额',
     });
 
     // 创建挑券处理器
     const matcher = new CouponMatcher(
       file,
       bondType as 'treasury' | 'local',
-      parseFloat(amount)
+      amounts
     );
 
     // 执行处理
@@ -57,7 +79,12 @@ export async function POST(request: NextRequest) {
     const bondTypeName = result.statistics.bondType === 'local' ? '地方债' : '国债';
     const now = new Date();
     const dateStr = `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-    const filename = `${bondTypeName}_${amount}万元_${dateStr}.xlsx`;
+    
+    // 多金额时显示多个金额
+    const amountDisplay = amounts.length > 1 
+      ? `${amounts.map(a => a.toLocaleString()).join('+')}万元`
+      : `${amounts[0].toLocaleString()}万元`;
+    const filename = `${bondTypeName}_${amountDisplay}_${dateStr}.xlsx`;
 
     // 返回文件
     return new NextResponse(buffer, {

@@ -8,13 +8,33 @@ interface BondData {
   rowNumber: number;       // 原始行号
   bondName: string;        // 债券名称（C列）
   availableAmount: number; // 可用金额（E列，万元）
-  selectedAmount: number;  // 挑券金额（计算得出）
   rowData: any[];          // 整行数据
+}
+
+/**
+ * 单个债券的分配结果
+ */
+interface BondAllocation {
+  bond: BondData;           // 债券信息
+  allocatedAmount: number;  // 本次分配的金额
+}
+
+/**
+ * 单个金额的处理结果（一个债券集合）
+ */
+interface AmountGroup {
+  targetAmount: number;           // 目标挑券金额
+  allocations: BondAllocation[];  // 分配的债券列表
+  actualAmount: number;           // 实际挑券金额
 }
 
 /**
  * 挑券模式处理器
  * 完全独立于其他功能模块
+ * 
+ * 支持单金额和多金额模式：
+ * - 单金额：输出第7行F列显示总金额
+ * - 多金额：每个集合间空一行，空行F列显示下一个金额
  * 
  * Excel结构说明：
  * - 第1-7行：其他内容（标题、说明等）
@@ -26,7 +46,7 @@ interface BondData {
 export class CouponMatcher {
   private file: File | Buffer;
   private bondType: 'treasury' | 'local'; // 用户选择的债券类型
-  private amount: number; // 挑券金额（万元）
+  private amounts: number[]; // 挑券金额数组（万元）
   private workbook: ExcelJS.Workbook;
   private worksheet: ExcelJS.Worksheet | null = null;
 
@@ -44,14 +64,12 @@ export class CouponMatcher {
     bondType: 'treasury' | 'local';
     totalRows: number;
     totalAvailable: number;
-    totalSelected: number;
-    selectedBonds: BondData[];
+    groups: AmountGroup[];
   } = {
     bondType: 'treasury',
     totalRows: 0,
     totalAvailable: 0,
-    totalSelected: 0,
-    selectedBonds: []
+    groups: []
   };
 
   // 最小占用金额（万元）
@@ -60,11 +78,11 @@ export class CouponMatcher {
   constructor(
     file: File | Buffer,
     bondType: 'treasury' | 'local',
-    amount: number
+    amounts: number[]
   ) {
     this.file = file;
     this.bondType = bondType;
-    this.amount = amount;
+    this.amounts = amounts;
     this.workbook = new ExcelJS.Workbook();
   }
 
@@ -74,7 +92,8 @@ export class CouponMatcher {
   async process(): Promise<{ workbook: ExcelJS.Workbook; statistics: any }> {
     console.log('=== 开始挑券处理 ===');
     console.log('用户选择类型:', this.bondType);
-    console.log('挑券金额:', this.amount, '万元');
+    console.log('挑券金额:', this.amounts, '万元');
+    console.log('模式:', this.amounts.length > 1 ? '多金额' : '单金额');
 
     // 1. 加载Excel文件
     await this.loadExcelFile();
@@ -90,8 +109,8 @@ export class CouponMatcher {
     }
     console.log('实际债券类型:', this.result.bondType);
 
-    // 4. 根据金额匹配债券
-    this.matchBondsByAmount();
+    // 4. 根据金额匹配债券（支持多金额）
+    this.matchBondsByAmounts();
 
     // 5. 生成结果Excel
     await this.generateResultWorkbook();
@@ -99,9 +118,14 @@ export class CouponMatcher {
     console.log('=== 挑券处理完成 ===');
     console.log('挑券统计:', {
       总可用金额: this.result.totalAvailable,
-      挑券金额: this.amount,
-      实际挑券: this.result.totalSelected,
-      挑券数量: this.result.selectedBonds.length
+      总挑券金额: this.amounts.reduce((a, b) => a + b, 0),
+      集合数量: this.result.groups.length,
+      各集合: this.result.groups.map((g, i) => ({
+        序号: i + 1,
+        目标金额: g.targetAmount,
+        实际金额: g.actualAmount,
+        债券数量: g.allocations.length
+      }))
     });
 
     return {
@@ -110,9 +134,13 @@ export class CouponMatcher {
         bondType: this.result.bondType,
         totalRows: this.result.totalRows,
         totalAvailable: this.result.totalAvailable,
-        totalSelected: this.result.totalSelected,
-        selectedCount: this.result.selectedBonds.length,
-        requestedAmount: this.amount
+        groups: this.result.groups.map(g => ({
+          targetAmount: g.targetAmount,
+          actualAmount: g.actualAmount,
+          bondCount: g.allocations.length
+        })),
+        totalSelected: this.result.groups.reduce((sum, g) => sum + g.actualAmount, 0),
+        requestedAmounts: this.amounts
       }
     };
   }
@@ -173,7 +201,6 @@ export class CouponMatcher {
           rowNumber,
           bondName,
           availableAmount,
-          selectedAmount: 0,
           rowData
         });
       }
@@ -204,98 +231,109 @@ export class CouponMatcher {
   }
 
   /**
-   * 根据金额匹配债券
-   * 规则：
-   * 1. 按E列可用金额从大到小排序
-   * 2. 优先占用金额大的债券
-   * 3. 最小占用金额为100万
+   * 多金额匹配债券
+   * 每个金额形成一个债券集合，集合间可以拆分同一只券
    */
-  private matchBondsByAmount(): void {
-    console.log('开始匹配债券，挑券金额:', this.amount, '万元');
-
-    // 按可用金额从大到小排序
-    const sortedBonds = [...this.bonds].sort((a, b) => b.availableAmount - a.availableAmount);
+  private matchBondsByAmounts(): void {
+    console.log('开始多金额匹配债券...');
 
     // 计算总可用金额
-    this.result.totalAvailable = sortedBonds.reduce((sum, bond) => sum + bond.availableAmount, 0);
+    this.result.totalAvailable = this.bonds.reduce((sum, bond) => sum + bond.availableAmount, 0);
     console.log('总可用金额:', this.result.totalAvailable, '万元');
 
-    // 检查是否足够
-    if (this.result.totalAvailable < this.amount) {
-      console.warn('警告：总可用金额不足！');
+    // 按可用金额从大到小排序（全局排序一次）
+    const sortedBonds = [...this.bonds].sort((a, b) => b.availableAmount - a.availableAmount);
+    
+    // 跟踪每只券的剩余可用金额
+    const bondRemaining = new Map<BondData, number>();
+    for (const bond of sortedBonds) {
+      bondRemaining.set(bond, bond.availableAmount);
     }
 
-    let remainingAmount = this.amount;
-    const selectedBonds: BondData[] = [];
+    // 对每个金额进行处理
+    for (let i = 0; i < this.amounts.length; i++) {
+      const targetAmount = this.amounts[i];
+      console.log(`\n处理第 ${i + 1} 个金额: ${targetAmount} 万元`);
 
-    for (let i = 0; i < sortedBonds.length && remainingAmount > 0; i++) {
-      const bond = sortedBonds[i];
-      
-      // 计算剩余债券的总可用金额
-      let remainingAvailable = 0;
-      for (let j = i; j < sortedBonds.length; j++) {
-        remainingAvailable += sortedBonds[j].availableAmount;
-      }
+      const group: AmountGroup = {
+        targetAmount,
+        allocations: [],
+        actualAmount: 0
+      };
 
-      // 计算可以挑的金额
-      let selectAmount = 0;
+      let remainingToAllocate = targetAmount;
 
-      if (bond.availableAmount <= remainingAmount) {
-        // 当前债券可用金额 <= 剩余挑券金额
-        const afterSelect = remainingAvailable - bond.availableAmount;
-        
-        if (afterSelect >= this.MIN_OCCUPY_AMOUNT || afterSelect === 0) {
-          selectAmount = bond.availableAmount;
+      // 按可用金额从大到小遍历债券
+      for (const bond of sortedBonds) {
+        if (remainingToAllocate <= 0) break;
+
+        const bondRemainingAmount = bondRemaining.get(bond) || 0;
+        if (bondRemainingAmount <= 0) continue;
+
+        // 计算可以分配的金额
+        let allocateAmount = 0;
+
+        if (bondRemainingAmount <= remainingToAllocate) {
+          // 当前债券剩余金额 <= 还需分配的金额，可以全部占用
+          allocateAmount = bondRemainingAmount;
         } else {
-          selectAmount = bond.availableAmount - this.MIN_OCCUPY_AMOUNT;
-          if (selectAmount < this.MIN_OCCUPY_AMOUNT) {
-            continue;
-          }
+          // 当前债券剩余金额 > 还需分配的金额，部分占用
+          allocateAmount = remainingToAllocate;
         }
-      } else {
-        // 当前债券可用金额 > 剩余挑券金额
-        selectAmount = remainingAmount;
-        
-        const leftover = bond.availableAmount - selectAmount;
+
+        // 检查剩余部分是否满足最小占用金额
+        const leftover = bondRemainingAmount - allocateAmount;
         if (leftover > 0 && leftover < this.MIN_OCCUPY_AMOUNT) {
-          if (remainingAmount === this.amount) {
-            selectAmount = bond.availableAmount;
+          // 如果剩余部分不足100万，则调整分配金额
+          if (remainingToAllocate === targetAmount && bondRemainingAmount >= targetAmount + this.MIN_OCCUPY_AMOUNT) {
+            // 如果是第一只券且足够大，可以多分配一些
+            allocateAmount = targetAmount;
+          } else if (leftover + remainingToAllocate <= bondRemainingAmount) {
+            // 尝试多分配一些，让剩余部分满足最小占用
+            allocateAmount = remainingToAllocate;
+            const newLeftover = bondRemainingAmount - allocateAmount;
+            if (newLeftover > 0 && newLeftover < this.MIN_OCCUPY_AMOUNT) {
+              // 还是不能满足，跳过这只券
+              continue;
+            }
           } else {
             continue;
           }
         }
+
+        if (allocateAmount >= this.MIN_OCCUPY_AMOUNT || allocateAmount === remainingToAllocate) {
+          group.allocations.push({
+            bond,
+            allocatedAmount: allocateAmount
+          });
+          group.actualAmount += allocateAmount;
+          remainingToAllocate -= allocateAmount;
+          bondRemaining.set(bond, bondRemainingAmount - allocateAmount);
+
+          console.log(`  挑选: ${bond.bondName}, 剩余${bondRemainingAmount}万, 分配${allocateAmount}万, 还需${remainingToAllocate}万`);
+        }
       }
 
-      if (selectAmount > remainingAmount) {
-        selectAmount = remainingAmount;
+      this.result.groups.push(group);
+
+      if (remainingToAllocate > 0) {
+        console.warn(`警告：第 ${i + 1} 个金额未能完全匹配，还剩 ${remainingToAllocate} 万元未挑`);
       }
-
-      if (selectAmount < this.MIN_OCCUPY_AMOUNT && remainingAmount >= this.MIN_OCCUPY_AMOUNT) {
-        continue;
-      }
-
-      if (selectAmount > 0) {
-        bond.selectedAmount = selectAmount;
-        selectedBonds.push(bond);
-        remainingAmount -= selectAmount;
-        
-        console.log(`  挑选: ${bond.bondName}, 可用${bond.availableAmount}万, 挑${selectAmount}万, 剩余需挑${remainingAmount}万`);
-      }
-    }
-
-    this.result.selectedBonds = selectedBonds;
-    this.result.totalSelected = this.amount - remainingAmount;
-
-    if (remainingAmount > 0) {
-      console.warn(`警告：未能完全匹配，还剩 ${remainingAmount} 万元未挑`);
     }
   }
 
   /**
    * 生成结果Excel
-   * 1. F列插入"挑券金额（万元）"，原F列及后面的列往右移
-   * 2. 债券按E列可用金额从大到小排序
-   * 3. F列第7行显示挑券完成后的总金额
+   * 
+   * 单金额模式：
+   * - 第7行F列显示挑券总金额
+   * - 数据从第9行开始
+   * 
+   * 多金额模式：
+   * - 第7行F列显示第一个金额
+   * - 每个集合间空一行
+   * - 空行F列显示下一个金额
+   * - 被拆分的券在下一个集合中复制字段信息
    */
   private async generateResultWorkbook(): Promise<void> {
     console.log('生成结果Excel...');
@@ -323,10 +361,10 @@ export class CouponMatcher {
         }
       });
       
-      // F列第7行显示挑券总金额
-      if (rowNumber === 7) {
-        newRow.getCell(this.AVAILABLE_COL + 1).value = this.result.totalSelected;
-        console.log(`F列第7行设置挑券总金额: ${this.result.totalSelected}万元`);
+      // 第7行F列显示第一个金额
+      if (rowNumber === 7 && this.result.groups.length > 0) {
+        newRow.getCell(this.AVAILABLE_COL + 1).value = this.result.groups[0].targetAmount;
+        console.log(`F列第7行设置第一个金额: ${this.result.groups[0].targetAmount}万元`);
       }
       
       newRow.commit();
@@ -350,34 +388,54 @@ export class CouponMatcher {
     newHeaderRow.getCell(this.AVAILABLE_COL + 1).value = '挑券金额（万元）';
     newHeaderRow.commit();
 
-    // 按可用金额从大到小排序选中的债券，写入数据行
-    const sortedBonds = [...this.result.selectedBonds].sort((a, b) => b.availableAmount - a.availableAmount);
-    
-    for (let i = 0; i < sortedBonds.length; i++) {
-      const bond = sortedBonds[i];
-      const newRowNumber = this.DATA_START_ROW + i;
-      const newRow = resultSheet.getRow(newRowNumber);
-      
-      // 复制原数据（A-E列）
-      for (let colIndex = 0; colIndex < bond.rowData.length; colIndex++) {
-        const colNumber = colIndex + 1;
-        if (colNumber < this.AVAILABLE_COL + 1) {
-          newRow.getCell(colNumber).value = bond.rowData[colIndex];
-        } else if (colNumber === this.AVAILABLE_COL) {
-          // E列
-          newRow.getCell(colNumber).value = bond.availableAmount;
+    // 写入债券数据
+    let currentRowNumber = this.DATA_START_ROW;
+
+    for (let groupIndex = 0; groupIndex < this.result.groups.length; groupIndex++) {
+      const group = this.result.groups[groupIndex];
+      console.log(`写入第 ${groupIndex + 1} 个债券集合，目标金额: ${group.targetAmount}万元`);
+
+      // 写入该集合的债券数据
+      for (const allocation of group.allocations) {
+        const newRow = resultSheet.getRow(currentRowNumber);
+        
+        // 复制原数据（A-E列）
+        for (let colIndex = 0; colIndex < allocation.bond.rowData.length; colIndex++) {
+          const colNumber = colIndex + 1;
+          if (colNumber < this.AVAILABLE_COL + 1) {
+            newRow.getCell(colNumber).value = allocation.bond.rowData[colIndex];
+          } else if (colNumber === this.AVAILABLE_COL) {
+            // E列：可用金额
+            newRow.getCell(colNumber).value = allocation.bond.availableAmount;
+          }
         }
+        
+        // F列：挑券金额
+        newRow.getCell(this.AVAILABLE_COL + 1).value = allocation.allocatedAmount;
+        
+        // G列及之后：原F列及之后的数据
+        for (let colIndex = this.AVAILABLE_COL; colIndex < allocation.bond.rowData.length; colIndex++) {
+          newRow.getCell(colIndex + 2).value = allocation.bond.rowData[colIndex];
+        }
+        
+        newRow.commit();
+        currentRowNumber++;
       }
-      
-      // F列：挑券金额
-      newRow.getCell(this.AVAILABLE_COL + 1).value = bond.selectedAmount;
-      
-      // G列及之后：原F列及之后的数据
-      for (let colIndex = this.AVAILABLE_COL; colIndex < bond.rowData.length; colIndex++) {
-        newRow.getCell(colIndex + 2).value = bond.rowData[colIndex];
+
+      // 如果不是最后一个集合，插入空行并显示下一个金额
+      if (groupIndex < this.result.groups.length - 1) {
+        const nextGroup = this.result.groups[groupIndex + 1];
+        const emptyRow = resultSheet.getRow(currentRowNumber);
+        
+        // 空行F列显示下一个金额
+        emptyRow.getCell(this.AVAILABLE_COL + 1).value = nextGroup.targetAmount;
+        
+        // 可选：设置空行的样式（如背景色）以区分
+        emptyRow.commit();
+        
+        console.log(`插入空行，F列显示下一个金额: ${nextGroup.targetAmount}万元`);
+        currentRowNumber++;
       }
-      
-      newRow.commit();
     }
 
     this.workbook = resultWorkbook;

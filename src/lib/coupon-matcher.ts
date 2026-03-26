@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import * as XLSX from 'xlsx';
 import { containsGeographyKeyword } from './geo-keywords';
 
 /**
@@ -49,6 +50,8 @@ interface ExclusionRule {
  * - 数字：精确匹配债券代码(B列)
  * - 文字：模糊匹配债券简称(C列)
  * 
+ * 支持文件格式：.xls 和 .xlsx
+ * 
  * Excel结构说明：
  * - 第1-7行：其他内容（标题、说明等）
  * - 第8行：字段列名（表头）
@@ -63,7 +66,10 @@ export class CouponMatcher {
   private amounts: number[]; // 挑券金额数组（万元）
   private excludedBonds: string[]; // 禁挑券列表
   private workbook: ExcelJS.Workbook;
-  private worksheet: ExcelJS.Worksheet | null = null;
+  
+  // 原始工作表数据（用于复制格式）
+  private sourceSheetData: any[][] = [];
+  private isXlsFormat: boolean = false;
 
   // Excel结构常量
   private readonly HEADER_ROW = 8;      // 表头行号
@@ -125,8 +131,6 @@ export class CouponMatcher {
       if (!trimmed) continue;
       
       // 判断是纯数字还是包含文字
-      // 纯数字：精确匹配代码
-      // 包含文字：模糊匹配名称
       const isNumeric = /^\d+$/.test(trimmed);
       
       this.exclusionRules.push({
@@ -174,7 +178,7 @@ export class CouponMatcher {
     console.log('模式:', this.amounts.length > 1 ? '多金额' : '单金额');
     console.log('禁挑券数量:', this.exclusionRules.length);
 
-    // 1. 加载Excel文件
+    // 1. 加载Excel文件（支持 .xls 和 .xlsx）
     await this.loadExcelFile();
 
     // 2. 读取债券数据（从第9行开始）
@@ -228,37 +232,64 @@ export class CouponMatcher {
 
   /**
    * 加载Excel文件
+   * 使用 xlsx 库支持 .xls 和 .xlsx 格式
    */
   private async loadExcelFile(): Promise<void> {
     console.log('加载Excel文件...');
 
     let buffer: Buffer;
+    let fileName = '';
+    
     if (this.file instanceof File) {
       const arrayBuffer = await this.file.arrayBuffer();
       buffer = Buffer.from(arrayBuffer);
-      console.log('文件名:', this.file.name, '大小:', buffer.length, 'bytes');
+      fileName = this.file.name;
+      console.log('文件名:', fileName, '大小:', buffer.length, 'bytes');
     } else {
       buffer = this.file;
       console.log('Buffer大小:', buffer.length, 'bytes');
     }
 
-    try {
-      await this.workbook.xlsx.load(buffer as any);
-    } catch (e: any) {
-      console.error('Excel加载失败:', e.message);
-      // 可能是 .xls 格式不支持
-      throw new Error('Excel文件加载失败，请确保上传的是 .xlsx 格式（不支持旧版 .xls 格式）');
-    }
+    // 检测文件格式
+    this.isXlsFormat = fileName.toLowerCase().endsWith('.xls') && !fileName.toLowerCase().endsWith('.xlsx');
+    console.log('文件格式:', this.isXlsFormat ? '.xls (旧格式)' : '.xlsx (新格式)');
 
-    const worksheetCount = this.workbook.worksheets.length;
-    console.log('工作表数量:', worksheetCount);
+    // 使用 xlsx 库读取文件（支持 .xls 和 .xlsx）
+    const xlsxWorkbook = XLSX.read(buffer, { type: 'buffer' });
     
-    if (worksheetCount === 0) {
-      throw new Error('Excel文件中没有工作表，请检查文件内容是否正确');
+    const sheetNames = xlsxWorkbook.SheetNames;
+    console.log('工作表列表:', sheetNames);
+    
+    if (sheetNames.length === 0) {
+      throw new Error('Excel文件中没有工作表，请检查文件内容');
     }
 
-    this.worksheet = this.workbook.worksheets[0];
-    console.log('工作表名称:', this.worksheet.name);
+    // 读取第一个工作表的数据
+    const firstSheet = xlsxWorkbook.Sheets[sheetNames[0]];
+    this.sourceSheetData = XLSX.utils.sheet_to_json(firstSheet, { 
+      header: 1,
+      defval: null,
+      raw: false  // 保持原始格式
+    }) as any[][];
+    
+    console.log('工作表名称:', sheetNames[0]);
+    console.log('数据行数:', this.sourceSheetData.length);
+
+    // 如果是 .xlsx 格式，用 exceljs 加载以保持格式
+    if (!this.isXlsFormat) {
+      try {
+        await this.workbook.xlsx.load(buffer as any);
+        console.log('ExcelJS 加载成功，保留原格式');
+      } catch (e) {
+        console.warn('ExcelJS 加载失败，将使用基础格式:', (e as Error).message);
+        // 如果 exceljs 加载失败，创建空工作簿
+        this.workbook = new ExcelJS.Workbook();
+      }
+    } else {
+      // .xls 格式，创建新工作簿
+      this.workbook = new ExcelJS.Workbook();
+      console.log('创建新工作簿用于输出 .xlsx 格式');
+    }
   }
 
   /**
@@ -268,34 +299,29 @@ export class CouponMatcher {
   private readBondData(): void {
     console.log('读取债券数据（从第9行开始）...');
 
-    if (!this.worksheet) return;
+    if (this.sourceSheetData.length === 0) {
+      console.warn('没有数据可读取');
+      return;
+    }
 
-    const rowCount = this.worksheet.rowCount;
-    console.log('工作表总行数:', rowCount);
-
-    // 从第9行开始读取数据
-    for (let rowNumber = this.DATA_START_ROW; rowNumber <= rowCount; rowNumber++) {
-      const row = this.worksheet.getRow(rowNumber);
+    // 从第9行开始读取数据（数组索引从0开始，所以是索引8）
+    for (let rowIndex = this.DATA_START_ROW - 1; rowIndex < this.sourceSheetData.length; rowIndex++) {
+      const row = this.sourceSheetData[rowIndex];
+      if (!row) continue;
       
-      // 读取B列（债券代码）、C列（债券名称）和E列（可用金额）
-      const bondCode = String(row.getCell(this.BOND_CODE_COL).value || '').trim();
-      const bondName = String(row.getCell(this.BOND_NAME_COL).value || '').trim();
-      const availableAmountStr = String(row.getCell(this.AVAILABLE_COL).value || '0').replace(/,/g, '');
+      // 读取B列（索引1）、C列（索引2）和E列（索引4）
+      const bondCode = String(row[this.BOND_CODE_COL - 1] || '').trim();
+      const bondName = String(row[this.BOND_NAME_COL - 1] || '').trim();
+      const availableAmountStr = String(row[this.AVAILABLE_COL - 1] || '0').replace(/,/g, '');
       const availableAmount = parseFloat(availableAmountStr);
 
       if (bondName && availableAmount > 0) {
-        // 保存整行数据
-        const rowData: any[] = [];
-        row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-          rowData[colNumber - 1] = cell.value;
-        });
-
         this.bonds.push({
-          rowNumber,
+          rowNumber: rowIndex + 1, // 行号从1开始
           bondCode,
           bondName,
           availableAmount,
-          rowData
+          rowData: row
         });
       }
     }
@@ -425,45 +451,30 @@ export class CouponMatcher {
 
   /**
    * 生成结果Excel
-   * 
-   * 单金额模式：
-   * - 第7行F列显示挑券总金额
-   * - 数据从第9行开始
-   * 
-   * 多金额模式：
-   * - 第7行F列显示第一个金额
-   * - 每个集合间空一行
-   * - 空行F列显示下一个金额
-   * - 被拆分的券在下一个集合中复制字段信息
    */
   private async generateResultWorkbook(): Promise<void> {
     console.log('生成结果Excel...');
 
-    if (!this.worksheet) return;
+    // 创建新工作表
+    const resultSheet = this.workbook.addWorksheet('挑券结果');
 
-    // 创建新的工作簿
-    const resultWorkbook = new ExcelJS.Workbook();
-    const resultSheet = resultWorkbook.addWorksheet(this.worksheet.name);
-
-    // 复制第1-7行（保持原样，但要插入F列）
-    for (let rowNumber = 1; rowNumber < this.HEADER_ROW; rowNumber++) {
-      const sourceRow = this.worksheet.getRow(rowNumber);
-      const newRow = resultSheet.getRow(rowNumber);
+    // 写入前7行（标题等）
+    for (let rowIdx = 0; rowIdx < this.HEADER_ROW - 1; rowIdx++) {
+      const sourceRow = this.sourceSheetData[rowIdx] || [];
+      const newRow = resultSheet.getRow(rowIdx + 1);
       
-      sourceRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-        if (colNumber < this.AVAILABLE_COL + 1) {
+      for (let colIdx = 0; colIdx < sourceRow.length; colIdx++) {
+        if (colIdx < this.AVAILABLE_COL) {
           // A-E列直接复制
-          newRow.getCell(colNumber).value = cell.value;
-          this.copyCellStyle(cell, newRow.getCell(colNumber));
+          newRow.getCell(colIdx + 1).value = sourceRow[colIdx];
         } else {
           // F列及后面的列往右移一格
-          newRow.getCell(colNumber + 1).value = cell.value;
-          this.copyCellStyle(cell, newRow.getCell(colNumber + 1));
+          newRow.getCell(colIdx + 2).value = sourceRow[colIdx];
         }
-      });
+      }
       
       // 第7行F列显示第一个金额
-      if (rowNumber === 7 && this.result.groups.length > 0) {
+      if (rowIdx === 6 && this.result.groups.length > 0) {
         newRow.getCell(this.AVAILABLE_COL + 1).value = this.result.groups[0].targetAmount;
         console.log(`F列第7行设置第一个金额: ${this.result.groups[0].targetAmount}万元`);
       }
@@ -471,22 +482,27 @@ export class CouponMatcher {
       newRow.commit();
     }
 
-    // 复制第8行（表头行），插入"挑券金额（万元）"列
-    const sourceHeaderRow = this.worksheet.getRow(this.HEADER_ROW);
+    // 写入表头行（第8行）
+    const headerRow = this.sourceSheetData[this.HEADER_ROW - 1] || [];
     const newHeaderRow = resultSheet.getRow(this.HEADER_ROW);
     
-    sourceHeaderRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-      if (colNumber < this.AVAILABLE_COL + 1) {
-        newHeaderRow.getCell(colNumber).value = cell.value;
-        this.copyCellStyle(cell, newHeaderRow.getCell(colNumber));
-      } else {
-        newHeaderRow.getCell(colNumber + 1).value = cell.value;
-        this.copyCellStyle(cell, newHeaderRow.getCell(colNumber + 1));
+    for (let colIdx = 0; colIdx < Math.max(headerRow.length, this.AVAILABLE_COL); colIdx++) {
+      if (colIdx < this.AVAILABLE_COL) {
+        newHeaderRow.getCell(colIdx + 1).value = headerRow[colIdx] || '';
+      } else if (colIdx === this.AVAILABLE_COL - 1) {
+        // E列
+        newHeaderRow.getCell(colIdx + 1).value = headerRow[colIdx] || '可用金额';
       }
-    });
+    }
     
     // F列插入"挑券金额（万元）"
     newHeaderRow.getCell(this.AVAILABLE_COL + 1).value = '挑券金额（万元）';
+    
+    // G列及之后
+    for (let colIdx = this.AVAILABLE_COL - 1; colIdx < headerRow.length; colIdx++) {
+      newHeaderRow.getCell(colIdx + 3).value = headerRow[colIdx];
+    }
+    
     newHeaderRow.commit();
 
     // 写入债券数据
@@ -499,24 +515,19 @@ export class CouponMatcher {
       // 写入该集合的债券数据
       for (const allocation of group.allocations) {
         const newRow = resultSheet.getRow(currentRowNumber);
+        const rowData = allocation.bond.rowData;
         
-        // 复制原数据（A-E列）
-        for (let colIndex = 0; colIndex < allocation.bond.rowData.length; colIndex++) {
-          const colNumber = colIndex + 1;
-          if (colNumber < this.AVAILABLE_COL + 1) {
-            newRow.getCell(colNumber).value = allocation.bond.rowData[colIndex];
-          } else if (colNumber === this.AVAILABLE_COL) {
-            // E列：可用金额
-            newRow.getCell(colNumber).value = allocation.bond.availableAmount;
-          }
+        // A-E列
+        for (let colIdx = 0; colIdx < this.AVAILABLE_COL; colIdx++) {
+          newRow.getCell(colIdx + 1).value = rowData[colIdx] || '';
         }
         
         // F列：挑券金额
         newRow.getCell(this.AVAILABLE_COL + 1).value = allocation.allocatedAmount;
         
         // G列及之后：原F列及之后的数据
-        for (let colIndex = this.AVAILABLE_COL; colIndex < allocation.bond.rowData.length; colIndex++) {
-          newRow.getCell(colIndex + 2).value = allocation.bond.rowData[colIndex];
+        for (let colIdx = this.AVAILABLE_COL - 1; colIdx < rowData.length; colIdx++) {
+          newRow.getCell(colIdx + 3).value = rowData[colIdx];
         }
         
         newRow.commit();
@@ -530,8 +541,6 @@ export class CouponMatcher {
         
         // 空行F列显示下一个金额
         emptyRow.getCell(this.AVAILABLE_COL + 1).value = nextGroup.targetAmount;
-        
-        // 可选：设置空行的样式（如背景色）以区分
         emptyRow.commit();
         
         console.log(`插入空行，F列显示下一个金额: ${nextGroup.targetAmount}万元`);
@@ -539,7 +548,7 @@ export class CouponMatcher {
       }
     }
 
-    this.workbook = resultWorkbook;
+    console.log('结果Excel生成完成，总行数:', currentRowNumber - 1);
   }
 
   /**

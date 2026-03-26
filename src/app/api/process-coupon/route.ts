@@ -8,6 +8,11 @@ import { CouponMatcher } from '@/lib/coupon-matcher';
  * 支持单金额和多金额模式：
  * - 单金额：传入 amount 参数
  * - 多金额：传入 amounts 参数（逗号分隔）
+ * 
+ * 支持禁挑券功能：
+ * - excludedBonds：禁挑券参数（逗号分隔）
+ * - 数字：精确匹配债券代码(B列)
+ * - 文字：模糊匹配债券简称(C列)
  */
 export async function POST(request: NextRequest) {
   try {
@@ -18,6 +23,9 @@ export async function POST(request: NextRequest) {
     // 支持两种参数格式
     const amountStr = formData.get('amount') as string;
     const amountsStr = formData.get('amounts') as string;
+    
+    // 禁挑券参数
+    const excludedBondsStr = formData.get('excludedBonds') as string;
 
     // 参数验证
     if (!file) {
@@ -55,18 +63,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 解析禁挑券列表
+    let excludedBonds: string[] = [];
+    if (excludedBondsStr && excludedBondsStr.trim()) {
+      excludedBonds = excludedBondsStr.split(/[,\s\n]+/).map(s => s.trim()).filter(s => s);
+    }
+
     console.log('挑券请求参数:', {
       fileName: file.name,
       bondType,
       amounts,
       mode: amounts.length > 1 ? '多金额' : '单金额',
+      excludedBonds: excludedBonds.length > 0 ? excludedBonds : '无',
     });
 
     // 创建挑券处理器
     const matcher = new CouponMatcher(
       file,
       bondType as 'treasury' | 'local',
-      amounts
+      amounts,
+      excludedBonds
     );
 
     // 执行处理

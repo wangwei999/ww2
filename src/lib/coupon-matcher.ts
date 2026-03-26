@@ -6,6 +6,7 @@ import { containsGeographyKeyword } from './geo-keywords';
  */
 interface BondData {
   rowNumber: number;       // 原始行号
+  bondCode: string;        // 债券代码（B列）
   bondName: string;        // 债券名称（C列）
   availableAmount: number; // 可用金额（E列，万元）
   rowData: any[];          // 整行数据
@@ -29,6 +30,14 @@ interface AmountGroup {
 }
 
 /**
+ * 禁挑券规则
+ */
+interface ExclusionRule {
+  original: string;    // 原始输入
+  type: 'code' | 'name'; // 类型：代码精确匹配 / 名称模糊匹配
+}
+
+/**
  * 挑券模式处理器
  * 完全独立于其他功能模块
  * 
@@ -36,10 +45,15 @@ interface AmountGroup {
  * - 单金额：输出第7行F列显示总金额
  * - 多金额：每个集合间空一行，空行F列显示下一个金额
  * 
+ * 支持禁挑券功能：
+ * - 数字：精确匹配债券代码(B列)
+ * - 文字：模糊匹配债券简称(C列)
+ * 
  * Excel结构说明：
  * - 第1-7行：其他内容（标题、说明等）
  * - 第8行：字段列名（表头）
  * - 第9行开始：债券数据
+ * - B列：债券代码
  * - C列：债券名称
  * - E列：可用金额
  */
@@ -47,28 +61,35 @@ export class CouponMatcher {
   private file: File | Buffer;
   private bondType: 'treasury' | 'local'; // 用户选择的债券类型
   private amounts: number[]; // 挑券金额数组（万元）
+  private excludedBonds: string[]; // 禁挑券列表
   private workbook: ExcelJS.Workbook;
   private worksheet: ExcelJS.Worksheet | null = null;
 
   // Excel结构常量
   private readonly HEADER_ROW = 8;      // 表头行号
   private readonly DATA_START_ROW = 9;  // 数据起始行号
+  private readonly BOND_CODE_COL = 2;   // B列 - 债券代码
   private readonly BOND_NAME_COL = 3;   // C列 - 债券名称
   private readonly AVAILABLE_COL = 5;   // E列 - 可用金额
 
   // 债券数据列表
   private bonds: BondData[] = [];
 
+  // 禁挑券规则
+  private exclusionRules: ExclusionRule[] = [];
+
   // 处理结果
   private result: {
     bondType: 'treasury' | 'local';
     totalRows: number;
     totalAvailable: number;
+    excludedCount: number;
     groups: AmountGroup[];
   } = {
     bondType: 'treasury',
     totalRows: 0,
     totalAvailable: 0,
+    excludedCount: 0,
     groups: []
   };
 
@@ -78,12 +99,69 @@ export class CouponMatcher {
   constructor(
     file: File | Buffer,
     bondType: 'treasury' | 'local',
-    amounts: number[]
+    amounts: number[],
+    excludedBonds: string[] = []
   ) {
     this.file = file;
     this.bondType = bondType;
     this.amounts = amounts;
+    this.excludedBonds = excludedBonds;
     this.workbook = new ExcelJS.Workbook();
+    
+    // 解析禁挑券规则
+    this.parseExclusionRules();
+  }
+
+  /**
+   * 解析禁挑券规则
+   * 数字 -> 代码精确匹配
+   * 文字 -> 名称模糊匹配
+   */
+  private parseExclusionRules(): void {
+    this.exclusionRules = [];
+    
+    for (const item of this.excludedBonds) {
+      const trimmed = item.trim();
+      if (!trimmed) continue;
+      
+      // 判断是纯数字还是包含文字
+      // 纯数字：精确匹配代码
+      // 包含文字：模糊匹配名称
+      const isNumeric = /^\d+$/.test(trimmed);
+      
+      this.exclusionRules.push({
+        original: trimmed,
+        type: isNumeric ? 'code' : 'name'
+      });
+    }
+    
+    if (this.exclusionRules.length > 0) {
+      console.log('禁挑券规则:', this.exclusionRules.map(r => 
+        `${r.original}(${r.type === 'code' ? '代码精确' : '名称模糊'})`
+      ).join(', '));
+    }
+  }
+
+  /**
+   * 检查债券是否被禁挑
+   */
+  private isBondExcluded(bond: BondData): boolean {
+    for (const rule of this.exclusionRules) {
+      if (rule.type === 'code') {
+        // 代码精确匹配
+        if (bond.bondCode === rule.original) {
+          console.log(`  禁挑: ${bond.bondName}(${bond.bondCode}) - 代码精确匹配"${rule.original}"`);
+          return true;
+        }
+      } else {
+        // 名称模糊匹配（包含）
+        if (bond.bondName.includes(rule.original)) {
+          console.log(`  禁挑: ${bond.bondName}(${bond.bondCode}) - 名称包含"${rule.original}"`);
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   /**
@@ -94,6 +172,7 @@ export class CouponMatcher {
     console.log('用户选择类型:', this.bondType);
     console.log('挑券金额:', this.amounts, '万元');
     console.log('模式:', this.amounts.length > 1 ? '多金额' : '单金额');
+    console.log('禁挑券数量:', this.exclusionRules.length);
 
     // 1. 加载Excel文件
     await this.loadExcelFile();
@@ -109,7 +188,7 @@ export class CouponMatcher {
     }
     console.log('实际债券类型:', this.result.bondType);
 
-    // 4. 根据金额匹配债券（支持多金额）
+    // 4. 根据金额匹配债券（支持多金额，排除禁挑券）
     this.matchBondsByAmounts();
 
     // 5. 生成结果Excel
@@ -119,6 +198,7 @@ export class CouponMatcher {
     console.log('挑券统计:', {
       总可用金额: this.result.totalAvailable,
       总挑券金额: this.amounts.reduce((a, b) => a + b, 0),
+      禁挑数量: this.result.excludedCount,
       集合数量: this.result.groups.length,
       各集合: this.result.groups.map((g, i) => ({
         序号: i + 1,
@@ -134,6 +214,7 @@ export class CouponMatcher {
         bondType: this.result.bondType,
         totalRows: this.result.totalRows,
         totalAvailable: this.result.totalAvailable,
+        excludedCount: this.result.excludedCount,
         groups: this.result.groups.map(g => ({
           targetAmount: g.targetAmount,
           actualAmount: g.actualAmount,
@@ -185,7 +266,8 @@ export class CouponMatcher {
     for (let rowNumber = this.DATA_START_ROW; rowNumber <= rowCount; rowNumber++) {
       const row = this.worksheet.getRow(rowNumber);
       
-      // 读取C列（债券名称）和E列（可用金额）
+      // 读取B列（债券代码）、C列（债券名称）和E列（可用金额）
+      const bondCode = String(row.getCell(this.BOND_CODE_COL).value || '').trim();
       const bondName = String(row.getCell(this.BOND_NAME_COL).value || '').trim();
       const availableAmountStr = String(row.getCell(this.AVAILABLE_COL).value || '0').replace(/,/g, '');
       const availableAmount = parseFloat(availableAmountStr);
@@ -199,6 +281,7 @@ export class CouponMatcher {
 
         this.bonds.push({
           rowNumber,
+          bondCode,
           bondName,
           availableAmount,
           rowData
@@ -233,16 +316,23 @@ export class CouponMatcher {
   /**
    * 多金额匹配债券
    * 每个金额形成一个债券集合，集合间可以拆分同一只券
+   * 排除被禁挑的债券
    */
   private matchBondsByAmounts(): void {
     console.log('开始多金额匹配债券...');
 
+    // 过滤掉被禁挑的债券
+    const availableBonds = this.bonds.filter(bond => !this.isBondExcluded(bond));
+    this.result.excludedCount = this.bonds.length - availableBonds.length;
+    
+    console.log(`可用债券: ${availableBonds.length} 条，禁挑: ${this.result.excludedCount} 条`);
+
     // 计算总可用金额
-    this.result.totalAvailable = this.bonds.reduce((sum, bond) => sum + bond.availableAmount, 0);
+    this.result.totalAvailable = availableBonds.reduce((sum, bond) => sum + bond.availableAmount, 0);
     console.log('总可用金额:', this.result.totalAvailable, '万元');
 
     // 按可用金额从大到小排序（全局排序一次）
-    const sortedBonds = [...this.bonds].sort((a, b) => b.availableAmount - a.availableAmount);
+    const sortedBonds = [...availableBonds].sort((a, b) => b.availableAmount - a.availableAmount);
     
     // 跟踪每只券的剩余可用金额
     const bondRemaining = new Map<BondData, number>();
@@ -310,7 +400,7 @@ export class CouponMatcher {
           remainingToAllocate -= allocateAmount;
           bondRemaining.set(bond, bondRemainingAmount - allocateAmount);
 
-          console.log(`  挑选: ${bond.bondName}, 剩余${bondRemainingAmount}万, 分配${allocateAmount}万, 还需${remainingToAllocate}万`);
+          console.log(`  挑选: ${bond.bondName}(${bond.bondCode}), 剩余${bondRemainingAmount}万, 分配${allocateAmount}万, 还需${remainingToAllocate}万`);
         }
       }
 

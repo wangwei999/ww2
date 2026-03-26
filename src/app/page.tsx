@@ -100,6 +100,7 @@ export default function Home() {
   const [couponFile, setCouponFile] = useState<File | null>(null);
   const [bondType, setBondType] = useState<BondType>('treasury');
   const [couponAmount, setCouponAmount] = useState<string>('');
+  const [excludedBonds, setExcludedBonds] = useState<string>(''); // 禁挑券
   
   const [processing, setProcessing] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -213,6 +214,8 @@ export default function Home() {
         formData.append('bondType', bondType);
         // 发送多个金额，用逗号分隔
         formData.append('amounts', amounts.join(','));
+        // 发送禁挑券参数
+        formData.append('excludedBonds', excludedBonds.trim());
 
         const response = await fetch('/api/process-coupon', {
           method: 'POST',
@@ -536,6 +539,43 @@ export default function Home() {
                       共 {parseAmounts(couponAmount).length} 笔金额，合计 {parseAmounts(couponAmount).reduce((a, b) => a + b, 0).toLocaleString()} 万元
                     </p>
                   )}
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {/* 禁挑券输入 */}
+          <Card className="p-6">
+            <div className="space-y-4">
+              <div>
+                <Label className="text-base font-semibold">禁挑券（可选）</Label>
+                <p className="text-sm text-muted-foreground mt-1">
+                  输入需要排除的债券，支持多个，用逗号、空格或换行分隔
+                </p>
+              </div>
+              <textarea
+                placeholder="输入债券代码（精确匹配）或债券简称（模糊匹配）&#10;例如：2071117 或 国开&#10;多个用逗号、空格或换行分隔"
+                value={excludedBonds}
+                onChange={(e) => setExcludedBonds(e.target.value)}
+                className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+              {/* 显示解析后的禁挑券列表 */}
+              {excludedBonds.trim() && (
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">已解析的禁挑券：</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {excludedBonds.split(/[,\s\n]+/).filter(s => s.trim()).map((item, index) => (
+                      <div
+                        key={index}
+                        className="px-3 py-1 bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400 rounded-full text-sm font-medium"
+                      >
+                        {item.trim()}
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    数字将精确匹配债券代码(B列)，文字将模糊匹配债券简称(C列)
+                  </p>
                 </div>
               )}
             </div>

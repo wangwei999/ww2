@@ -550,31 +550,48 @@ export default function Home() {
               <div>
                 <Label className="text-base font-semibold">禁挑券（可选）</Label>
                 <p className="text-sm text-muted-foreground mt-1">
-                  输入需要排除的债券，支持多个，用中英文逗号、空格或换行分隔
+                  输入需要排除的债券，支持全局禁挑或指定某笔金额禁挑
                 </p>
               </div>
               <textarea
-                placeholder="输入债券代码（精确匹配）或债券简称（模糊匹配）&#10;例如：2071117 或 国开&#10;多个用逗号、空格或换行分隔"
+                placeholder="全局禁挑：输入代码或简称，如 2071117 或 国开&#10;指定金额禁挑：/数字+关键词，如 /1国开 表示第1笔金额禁挑国开&#10;多个用逗号、空格或换行分隔"
                 value={excludedBonds}
                 onChange={(e) => setExcludedBonds(e.target.value)}
-                className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
               />
               {/* 显示解析后的禁挑券列表 */}
               {excludedBonds.trim() && (
                 <div className="space-y-2">
                   <Label className="text-sm font-medium">已解析的禁挑券：</Label>
                   <div className="flex flex-wrap gap-2">
-                    {excludedBonds.split(/[,，\s\n]+/).filter(s => s.trim()).map((item, index) => (
-                      <div
-                        key={index}
-                        className="px-3 py-1 bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400 rounded-full text-sm font-medium"
-                      >
-                        {item.trim()}
-                      </div>
-                    ))}
+                    {excludedBonds.split(/[,，\s\n]+/).filter(s => s.trim()).map((item, index) => {
+                      const trimmed = item.trim();
+                      const groupMatch = trimmed.match(/^\/(\d+)(.+)$/);
+                      const isGlobal = !groupMatch;
+                      const keyword = groupMatch ? groupMatch[2] : trimmed;
+                      const groupIndex = groupMatch ? groupMatch[1] : null;
+                      
+                      return (
+                        <div
+                          key={index}
+                          className={`px-3 py-1 rounded-full text-sm font-medium ${
+                            isGlobal 
+                              ? 'bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400' 
+                              : 'bg-orange-100 text-orange-700 dark:bg-orange-950/30 dark:text-orange-400'
+                          }`}
+                        >
+                          {isGlobal ? (
+                            <span>{keyword} (全局)</span>
+                          ) : (
+                            <span>{keyword} (第{groupIndex}笔)</span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    数字将精确匹配债券代码(B列)，文字将模糊匹配债券简称(C列)
+                    数字精确匹配债券代码(B列)，文字模糊匹配债券简称(C列)；
+                    <span className="text-orange-600 dark:text-orange-400">橙色</span>表示指定金额禁挑，<span className="text-red-600 dark:text-red-400">红色</span>表示全局禁挑
                   </p>
                 </div>
               )}

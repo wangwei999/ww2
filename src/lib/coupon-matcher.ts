@@ -35,8 +35,10 @@ interface AmountGroup {
  * 禁挑券规则
  */
 interface ExclusionRule {
-  original: string;    // 原始输入
-  type: 'code' | 'name'; // 类型：代码精确匹配 / 名称模糊匹配
+  original: string;         // 原始输入
+  type: 'code' | 'name';    // 类型：代码精确匹配 / 名称模糊匹配
+  groupIndex?: number;      // 针对第几笔金额（从1开始），不设置表示全局禁挑
+  keyword: string;          // 匹配关键词
 }
 
 /**
@@ -123,8 +125,11 @@ export class CouponMatcher {
 
   /**
    * 解析禁挑券规则
-   * 数字 -> 代码精确匹配
-   * 文字 -> 名称模糊匹配
+   * 格式：
+   * - 纯数字：代码精确匹配（全局）
+   * - 文字：名称模糊匹配（全局）
+   * - /1国开：第1笔金额禁挑名称包含"国开"的债券
+   * - /22071117：第2笔金额禁挑代码为"2071117"的债券
    */
   private parseExclusionRules(): void {
     this.exclusionRules = [];
@@ -133,37 +138,66 @@ export class CouponMatcher {
       const trimmed = item.trim();
       if (!trimmed) continue;
       
-      // 判断是纯数字还是包含文字
-      const isNumeric = /^\d+$/.test(trimmed);
+      // 检查是否有 /数字 前缀
+      const groupMatch = trimmed.match(/^\/(\d+)(.+)$/);
       
-      this.exclusionRules.push({
-        original: trimmed,
-        type: isNumeric ? 'code' : 'name'
-      });
+      if (groupMatch) {
+        // 带金额序号的禁挑券
+        const groupIndex = parseInt(groupMatch[1], 10);
+        const keyword = groupMatch[2].trim();
+        const isNumeric = /^\d+$/.test(keyword);
+        
+        this.exclusionRules.push({
+          original: trimmed,
+          type: isNumeric ? 'code' : 'name',
+          groupIndex,
+          keyword
+        });
+      } else {
+        // 全局禁挑券
+        const isNumeric = /^\d+$/.test(trimmed);
+        
+        this.exclusionRules.push({
+          original: trimmed,
+          type: isNumeric ? 'code' : 'name',
+          keyword: trimmed
+        });
+      }
     }
     
     if (this.exclusionRules.length > 0) {
-      console.log('禁挑券规则:', this.exclusionRules.map(r => 
-        `${r.original}(${r.type === 'code' ? '代码精确' : '名称模糊'})`
-      ).join(', '));
+      console.log('禁挑券规则:', this.exclusionRules.map(r => {
+        const scope = r.groupIndex ? `第${r.groupIndex}笔` : '全局';
+        const matchType = r.type === 'code' ? '代码精确' : '名称模糊';
+        return `${r.keyword}(${scope},${matchType})`;
+      }).join(', '));
     }
   }
 
   /**
    * 检查债券是否被禁挑
+   * @param bond 债券信息
+   * @param currentGroupIndex 当前处理的金额序号（从1开始）
    */
-  private isBondExcluded(bond: BondData): boolean {
+  private isBondExcluded(bond: BondData, currentGroupIndex: number): boolean {
     for (const rule of this.exclusionRules) {
+      // 如果规则指定了金额序号，只对对应序号生效
+      if (rule.groupIndex !== undefined && rule.groupIndex !== currentGroupIndex) {
+        continue;
+      }
+      
       if (rule.type === 'code') {
         // 代码精确匹配
-        if (bond.bondCode === rule.original) {
-          console.log(`  禁挑: ${bond.bondName}(${bond.bondCode}) - 代码精确匹配"${rule.original}"`);
+        if (bond.bondCode === rule.keyword) {
+          const scope = rule.groupIndex ? `第${rule.groupIndex}笔` : '全局';
+          console.log(`  禁挑: ${bond.bondName}(${bond.bondCode}) - ${scope}代码精确匹配"${rule.keyword}"`);
           return true;
         }
       } else {
         // 名称模糊匹配（包含）
-        if (bond.bondName.includes(rule.original)) {
-          console.log(`  禁挑: ${bond.bondName}(${bond.bondCode}) - 名称包含"${rule.original}"`);
+        if (bond.bondName.includes(rule.keyword)) {
+          const scope = rule.groupIndex ? `第${rule.groupIndex}笔` : '全局';
+          console.log(`  禁挑: ${bond.bondName}(${bond.bondCode}) - ${scope}名称包含"${rule.keyword}"`);
           return true;
         }
       }
@@ -347,33 +381,28 @@ export class CouponMatcher {
   /**
    * 多金额匹配债券
    * 根据用户选择的类型过滤债券
-   * 排除被禁挑的债券
+   * 排除被禁挑的债券（支持按金额序号指定）
    */
   private matchBondsByAmounts(): void {
     console.log('开始多金额匹配债券...');
     console.log(`用户选择类型: ${this.bondType === 'local' ? '地方债' : '国债'}`);
 
     // 第一步：根据用户选择的类型过滤债券
-    let filteredBonds = this.bonds.filter(bond => bond.bondActualType === this.bondType);
-    this.result.typeFilteredCount = this.bonds.length - filteredBonds.length;
-    console.log(`类型过滤: 保留 ${filteredBonds.length} 条${this.bondType === 'local' ? '地方债' : '国债'}，过滤 ${this.result.typeFilteredCount} 条其他类型`);
+    const typeFilteredBonds = this.bonds.filter(bond => bond.bondActualType === this.bondType);
+    this.result.typeFilteredCount = this.bonds.length - typeFilteredBonds.length;
+    console.log(`类型过滤: 保留 ${typeFilteredBonds.length} 条${this.bondType === 'local' ? '地方债' : '国债'}，过滤 ${this.result.typeFilteredCount} 条其他类型`);
 
-    // 第二步：过滤掉被禁挑的债券
-    const availableBonds = filteredBonds.filter(bond => !this.isBondExcluded(bond));
-    this.result.excludedCount = filteredBonds.length - availableBonds.length;
-    console.log(`禁挑券过滤: 禁挑 ${this.result.excludedCount} 条，可用 ${availableBonds.length} 条`);
+    // 计算总可用金额（类型过滤后）
+    this.result.totalAvailable = typeFilteredBonds.reduce((sum, bond) => sum + bond.availableAmount, 0);
+    console.log('类型过滤后总可用金额:', this.result.totalAvailable, '万元');
 
-    // 计算总可用金额
-    this.result.totalAvailable = availableBonds.reduce((sum, bond) => sum + bond.availableAmount, 0);
-    console.log('总可用金额:', this.result.totalAvailable, '万元');
-
-    if (availableBonds.length === 0) {
+    if (typeFilteredBonds.length === 0) {
       console.warn('警告：没有符合条件的债券可挑选！');
       return;
     }
 
-    // 按可用金额从大到小排序（全局排序一次）
-    const sortedBonds = [...availableBonds].sort((a, b) => b.availableAmount - a.availableAmount);
+    // 按可用金额从大到小排序
+    const sortedBonds = [...typeFilteredBonds].sort((a, b) => b.availableAmount - a.availableAmount);
     
     // 跟踪每只券的剩余可用金额
     const bondRemaining = new Map<BondData, number>();
@@ -383,8 +412,9 @@ export class CouponMatcher {
 
     // 对每个金额进行处理
     for (let i = 0; i < this.amounts.length; i++) {
+      const groupIndex = i + 1; // 金额序号从1开始
       const targetAmount = this.amounts[i];
-      console.log(`\n处理第 ${i + 1} 个金额: ${targetAmount} 万元`);
+      console.log(`\n处理第 ${groupIndex} 个金额: ${targetAmount} 万元`);
 
       const group: AmountGroup = {
         targetAmount,
@@ -400,6 +430,11 @@ export class CouponMatcher {
 
         const bondRemainingAmount = bondRemaining.get(bond) || 0;
         if (bondRemainingAmount <= 0) continue;
+
+        // 检查该债券是否在当前金额序号下被禁挑
+        if (this.isBondExcluded(bond, groupIndex)) {
+          continue;
+        }
 
         // 计算可以分配的金额
         let allocateAmount = 0;

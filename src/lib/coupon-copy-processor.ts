@@ -11,17 +11,18 @@ interface BondData {
   bondName: string;        // 债券名称（C列）
   availableAmount: number; // 可用金额（E列，万元）
   rowData: any[];          // 整行数据
-  category: 'treasury' | 'policy' | 'local'; // 债券分类：国债/政金债/地方债
+  category: 'treasury' | 'policy' | 'local' | 'credit'; // 债券分类：国债/政金债/地方债/信用债
 }
 
 /**
  * 债券副本处理器
- * 上传文件后自动生成三个分类工作表：国债、政金债、地方债
+ * 上传文件后自动生成四个分类工作表：国债、政金债、地方债、信用债
  * 
  * 分类规则：
  * - 地方债：C列（债券名称）包含地理名词（省-市-县-区）
  * - 政金债：C列包含"国开"、"进出口"、"农发"
- * - 国债：既不是地方债也不是政金债
+ * - 国债：既不是地方债也不是政金债，且债券简称含"国债"字样
+ * - 信用债：既不是地方债也不是政金债，且债券简称不含"国债"字样
  * 
  * 排序规则：按可用金额（E列）从大到小排列
  */
@@ -48,11 +49,13 @@ export class CouponCopyProcessor {
     treasuryCount: number;
     policyCount: number;
     localCount: number;
+    creditCount: number;
   } = {
     totalRows: 0,
     treasuryCount: 0,
     policyCount: 0,
-    localCount: 0
+    localCount: 0,
+    creditCount: 0
   };
 
   constructor(file: File | Buffer) {
@@ -72,19 +75,21 @@ export class CouponCopyProcessor {
     // 2. 读取债券数据并分类
     this.readAndClassifyBonds();
 
-    // 3. 创建三个分类工作表
+    // 3. 创建四个分类工作表
     this.createClassificationSheets();
 
     // 4. 统计信息
     this.result.treasuryCount = this.bonds.filter(b => b.category === 'treasury').length;
     this.result.policyCount = this.bonds.filter(b => b.category === 'policy').length;
     this.result.localCount = this.bonds.filter(b => b.category === 'local').length;
+    this.result.creditCount = this.bonds.filter(b => b.category === 'credit').length;
 
     console.log('处理完成:', {
       总债券数: this.result.totalRows,
       国债数: this.result.treasuryCount,
       政金债数: this.result.policyCount,
-      地方债数: this.result.localCount
+      地方债数: this.result.localCount,
+      信用债数: this.result.creditCount
     });
 
     return {
@@ -180,9 +185,9 @@ export class CouponCopyProcessor {
 
   /**
    * 债券分类
-   * 优先级：地方债 > 政金债 > 国债
+   * 优先级：地方债 > 政金债 > 国债/信用债
    */
-  private classifyBond(bondName: string): 'treasury' | 'policy' | 'local' {
+  private classifyBond(bondName: string): 'treasury' | 'policy' | 'local' | 'credit' {
     // 1. 判断是否为地方债：包含地理名词
     if (containsGeographyKeyword(bondName)) {
       return 'local';
@@ -193,12 +198,17 @@ export class CouponCopyProcessor {
       return 'policy';
     }
 
-    // 3. 其余为国债
-    return 'treasury';
+    // 3. 剩余债券：判断是否含"国债"字样
+    if (bondName.includes('国债')) {
+      return 'treasury';
+    }
+
+    // 4. 其余为信用债
+    return 'credit';
   }
 
   /**
-   * 创建三个分类工作表
+   * 创建四个分类工作表
    */
   private createClassificationSheets(): void {
     console.log('创建分类工作表...');
@@ -219,6 +229,10 @@ export class CouponCopyProcessor {
       .filter(b => b.category === 'local')
       .sort((a, b) => b.availableAmount - a.availableAmount);
 
+    const creditBonds = this.bonds
+      .filter(b => b.category === 'credit')
+      .sort((a, b) => b.availableAmount - a.availableAmount);
+
     // 如果是 .xls 格式，需要创建新工作簿
     if (this.isXlsFormat) {
       this.workbook = new ExcelJS.Workbook();
@@ -228,12 +242,13 @@ export class CouponCopyProcessor {
     const sheetsToRemove = this.workbook.worksheets.slice(1);
     sheetsToRemove.forEach(sheet => this.workbook.removeWorksheet(sheet.id));
 
-    // 创建三个分类工作表
+    // 创建四个分类工作表
     this.createSheet('国债', headerRow, treasuryBonds);
     this.createSheet('政金债', headerRow, policyBonds);
     this.createSheet('地方债', headerRow, localBonds);
+    this.createSheet('信用债', headerRow, creditBonds);
 
-    console.log(`创建完成：国债 ${treasuryBonds.length} 条，政金债 ${policyBonds.length} 条，地方债 ${localBonds.length} 条`);
+    console.log(`创建完成：国债 ${treasuryBonds.length} 条，政金债 ${policyBonds.length} 条，地方债 ${localBonds.length} 条，信用债 ${creditBonds.length} 条`);
   }
 
   /**

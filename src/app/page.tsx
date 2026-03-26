@@ -6,8 +6,9 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Upload, FileSpreadsheet, Download, Loader2, CheckCircle, AlertCircle, X, FileText } from 'lucide-react';
+import { Upload, FileSpreadsheet, Download, Loader2, CheckCircle, AlertCircle, X, FileText, Ticket } from 'lucide-react';
 import { toast } from 'sonner';
+import Link from 'next/link';
 
 type ProcessMode = 'normal' | 'credit' | 'pdf' | 'basic';
 
@@ -465,6 +466,16 @@ export default function Home() {
           <p className="text-muted-foreground">
             上传数据源文件和缺失文件，自动识别表格、匹配字段并填充数据
           </p>
+        </div>
+
+        {/* 挑券入口 */}
+        <div className="flex justify-center">
+          <Link href="/coupon">
+            <Button variant="outline" size="lg" className="gap-2">
+              <Ticket className="h-5 w-5" />
+              进入挑券功能
+            </Button>
+          </Link>
         </div>
 
         {/* 模式选择 */}

@@ -236,17 +236,28 @@ export class CouponMatcher {
     if (this.file instanceof File) {
       const arrayBuffer = await this.file.arrayBuffer();
       buffer = Buffer.from(arrayBuffer);
+      console.log('文件名:', this.file.name, '大小:', buffer.length, 'bytes');
     } else {
       buffer = this.file;
+      console.log('Buffer大小:', buffer.length, 'bytes');
     }
 
-    await this.workbook.xlsx.load(buffer as any);
+    try {
+      await this.workbook.xlsx.load(buffer as any);
+    } catch (e: any) {
+      console.error('Excel加载失败:', e.message);
+      // 可能是 .xls 格式不支持
+      throw new Error('Excel文件加载失败，请确保上传的是 .xlsx 格式（不支持旧版 .xls 格式）');
+    }
+
+    const worksheetCount = this.workbook.worksheets.length;
+    console.log('工作表数量:', worksheetCount);
+    
+    if (worksheetCount === 0) {
+      throw new Error('Excel文件中没有工作表，请检查文件内容是否正确');
+    }
 
     this.worksheet = this.workbook.worksheets[0];
-    if (!this.worksheet) {
-      throw new Error('Excel文件中没有工作表');
-    }
-
     console.log('工作表名称:', this.worksheet.name);
   }
 

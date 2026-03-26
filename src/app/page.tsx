@@ -468,10 +468,10 @@ export default function Home() {
           {/* 文件上传 */}
           <FileUpload
             label="上传Excel文件"
-            description="上传包含债券数据的Excel文件"
+            description="上传包含债券数据的Excel文件（仅支持 .xlsx 格式）"
             file={couponFile}
             onFileChange={handleCouponFileChange}
-            acceptedTypes=".xlsx,.xls"
+            acceptedTypes=".xlsx"
           />
 
           {/* 债券类型选择 */}

@@ -11,7 +11,7 @@ interface BondData {
   bondName: string;        // 债券名称（C列）
   availableAmount: number; // 可用金额（E列，万元）
   rowData: any[];          // 整行数据
-  bondActualType: 'treasury' | 'local'; // 债券实际类型
+  bondActualType: 'treasury' | 'policy' | 'local'; // 债券实际类型：国债/政金债/地方债
 }
 
 /**
@@ -350,8 +350,19 @@ export class CouponMatcher {
       const availableAmount = parseFloat(availableAmountStr);
 
       if (bondName && availableAmount > 0) {
-        // 判断债券类型：包含地理名词为地方债，否则为国债
-        const bondActualType = containsGeographyKeyword(bondName) ? 'local' : 'treasury';
+        // 判断债券类型
+        // 1. 地方债：包含地理名词
+        // 2. 政金债：包含"国开"、"进出口"、"农发"
+        // 3. 国债：其他
+        let bondActualType: 'treasury' | 'policy' | 'local';
+        
+        if (containsGeographyKeyword(bondName)) {
+          bondActualType = 'local';
+        } else if (bondName.includes('国开') || bondName.includes('进出口') || bondName.includes('农发')) {
+          bondActualType = 'policy';
+        } else {
+          bondActualType = 'treasury';
+        }
         
         this.bonds.push({
           rowNumber: rowIndex + 1, // 行号从1开始
@@ -364,17 +375,19 @@ export class CouponMatcher {
         
         // 输出前10只债券的类型判断结果
         if (this.bonds.length <= 10) {
-          console.log(`  ${bondName} -> ${bondActualType === 'local' ? '地方债' : '国债'}`);
+          const typeNames = { local: '地方债', policy: '政金债', treasury: '国债' };
+          console.log(`  ${bondName} -> ${typeNames[bondActualType]}`);
         }
       }
     }
 
-    // 统计地方债和国债数量
+    // 统计各类债券数量
     const localCount = this.bonds.filter(b => b.bondActualType === 'local').length;
+    const policyCount = this.bonds.filter(b => b.bondActualType === 'policy').length;
     const treasuryCount = this.bonds.filter(b => b.bondActualType === 'treasury').length;
     
     console.log(`读取到 ${this.bonds.length} 条债券数据`);
-    console.log(`其中：地方债 ${localCount} 条，国债 ${treasuryCount} 条`);
+    console.log(`其中：地方债 ${localCount} 条，政金债 ${policyCount} 条，国债 ${treasuryCount} 条`);
     this.result.totalRows = this.bonds.length;
   }
 
@@ -385,12 +398,22 @@ export class CouponMatcher {
    */
   private matchBondsByAmounts(): void {
     console.log('开始多金额匹配债券...');
-    console.log(`用户选择类型: ${this.bondType === 'local' ? '地方债' : '国债'}`);
+    console.log(`用户选择类型: ${this.bondType === 'local' ? '地方债' : '国债/政金债'}`);
 
     // 第一步：根据用户选择的类型过滤债券
-    const typeFilteredBonds = this.bonds.filter(bond => bond.bondActualType === this.bondType);
+    // treasury: 包含国债和政金债
+    // local: 只包含地方债
+    let typeFilteredBonds: BondData[];
+    if (this.bondType === 'local') {
+      typeFilteredBonds = this.bonds.filter(bond => bond.bondActualType === 'local');
+    } else {
+      // 国债/政金债：包含国债和政金债
+      typeFilteredBonds = this.bonds.filter(bond => 
+        bond.bondActualType === 'treasury' || bond.bondActualType === 'policy'
+      );
+    }
     this.result.typeFilteredCount = this.bonds.length - typeFilteredBonds.length;
-    console.log(`类型过滤: 保留 ${typeFilteredBonds.length} 条${this.bondType === 'local' ? '地方债' : '国债'}，过滤 ${this.result.typeFilteredCount} 条其他类型`);
+    console.log(`类型过滤: 保留 ${typeFilteredBonds.length} 条${this.bondType === 'local' ? '地方债' : '国债/政金债'}，过滤 ${this.result.typeFilteredCount} 条其他类型`);
 
     // 计算总可用金额（类型过滤后）
     this.result.totalAvailable = typeFilteredBonds.reduce((sum, bond) => sum + bond.availableAmount, 0);

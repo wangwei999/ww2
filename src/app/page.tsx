@@ -10,7 +10,7 @@ import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertCircle, X, FileText
 import { toast } from 'sonner';
 
 type ProcessMode = 'coupon' | 'normal' | 'credit' | 'pdf' | 'basic';
-type BondType = 'treasury' | 'local'; // 国债 / 地方债
+type BondType = 'treasury' | 'local'; // 国债/政金债 / 地方债
 
 interface FileUploadProps {
   label: string;
@@ -484,9 +484,9 @@ export default function Home() {
                 <div className="flex items-center space-x-2 p-4 border rounded-lg hover:bg-muted/50 cursor-pointer">
                   <RadioGroupItem value="treasury" id="treasury" />
                   <div className="flex-1">
-                    <Label htmlFor="treasury" className="font-medium cursor-pointer">国债</Label>
+                    <Label htmlFor="treasury" className="font-medium cursor-pointer">国债/政金债</Label>
                     <p className="text-xs text-muted-foreground mt-1">
-                      筛选国债类型债券
+                      筛选国债和政金债类型债券
                     </p>
                   </div>
                 </div>

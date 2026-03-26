@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
     const buffer = await result.workbook.xlsx.writeBuffer();
 
     // 生成文件名：债券类型_挑券金额_日期.xlsx
-    const bondTypeName = result.statistics.bondType === 'local' ? '地方债' : '国债';
+    const bondTypeName = result.statistics.bondType === 'local' ? '地方债' : '国债政金债';
     const now = new Date();
     const dateStr = `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
     

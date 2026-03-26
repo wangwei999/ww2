@@ -11,6 +11,7 @@ interface BondData {
   bondName: string;        // 债券名称（C列）
   availableAmount: number; // 可用金额（E列，万元）
   rowData: any[];          // 整行数据
+  bondActualType: 'treasury' | 'local'; // 债券实际类型
 }
 
 /**
@@ -90,12 +91,14 @@ export class CouponMatcher {
     totalRows: number;
     totalAvailable: number;
     excludedCount: number;
+    typeFilteredCount: number; // 因类型不符被过滤的数量
     groups: AmountGroup[];
   } = {
     bondType: 'treasury',
     totalRows: 0,
     totalAvailable: 0,
     excludedCount: 0,
+    typeFilteredCount: 0,
     groups: []
   };
 
@@ -173,7 +176,7 @@ export class CouponMatcher {
    */
   async process(): Promise<{ workbook: ExcelJS.Workbook; statistics: any }> {
     console.log('=== 开始挑券处理 ===');
-    console.log('用户选择类型:', this.bondType);
+    console.log('用户选择类型:', this.bondType === 'local' ? '地方债' : '国债');
     console.log('挑券金额:', this.amounts, '万元');
     console.log('模式:', this.amounts.length > 1 ? '多金额' : '单金额');
     console.log('禁挑券数量:', this.exclusionRules.length);
@@ -181,28 +184,23 @@ export class CouponMatcher {
     // 1. 加载Excel文件（支持 .xls 和 .xlsx）
     await this.loadExcelFile();
 
-    // 2. 读取债券数据（从第9行开始）
+    // 2. 读取债券数据（从第9行开始），并判断每只债券的类型
     this.readBondData();
 
-    // 3. 判断债券类型（如果用户选择地方债）
-    if (this.bondType === 'local') {
-      this.determineBondType();
-    } else {
-      this.result.bondType = 'treasury';
-    }
-    console.log('实际债券类型:', this.result.bondType);
-
-    // 4. 根据金额匹配债券（支持多金额，排除禁挑券）
+    // 3. 根据金额匹配债券（根据用户选择的类型过滤，排除禁挑券）
     this.matchBondsByAmounts();
 
-    // 5. 生成结果Excel
+    // 4. 生成结果Excel
     await this.generateResultWorkbook();
 
     console.log('=== 挑券处理完成 ===');
     console.log('挑券统计:', {
+      总债券数: this.result.totalRows,
+      用户选择类型: this.bondType === 'local' ? '地方债' : '国债',
+      类型不符过滤: this.result.typeFilteredCount,
+      禁挑数量: this.result.excludedCount,
       总可用金额: this.result.totalAvailable,
       总挑券金额: this.amounts.reduce((a, b) => a + b, 0),
-      禁挑数量: this.result.excludedCount,
       集合数量: this.result.groups.length,
       各集合: this.result.groups.map((g, i) => ({
         序号: i + 1,
@@ -215,10 +213,11 @@ export class CouponMatcher {
     return {
       workbook: this.workbook,
       statistics: {
-        bondType: this.result.bondType,
+        bondType: this.bondType,
         totalRows: this.result.totalRows,
         totalAvailable: this.result.totalAvailable,
         excludedCount: this.result.excludedCount,
+        typeFilteredCount: this.result.typeFilteredCount,
         groups: this.result.groups.map(g => ({
           targetAmount: g.targetAmount,
           actualAmount: g.actualAmount,
@@ -295,6 +294,7 @@ export class CouponMatcher {
   /**
    * 读取债券数据
    * 从第9行开始读取（第8行是表头）
+   * 同时判断每只债券的类型（地方债/国债）
    */
   private readBondData(): void {
     console.log('读取债券数据（从第9行开始）...');
@@ -316,57 +316,61 @@ export class CouponMatcher {
       const availableAmount = parseFloat(availableAmountStr);
 
       if (bondName && availableAmount > 0) {
+        // 判断债券类型：包含地理名词为地方债，否则为国债
+        const bondActualType = containsGeographyKeyword(bondName) ? 'local' : 'treasury';
+        
         this.bonds.push({
           rowNumber: rowIndex + 1, // 行号从1开始
           bondCode,
           bondName,
           availableAmount,
-          rowData: row
+          rowData: row,
+          bondActualType
         });
+        
+        // 输出前10只债券的类型判断结果
+        if (this.bonds.length <= 10) {
+          console.log(`  ${bondName} -> ${bondActualType === 'local' ? '地方债' : '国债'}`);
+        }
       }
     }
 
+    // 统计地方债和国债数量
+    const localCount = this.bonds.filter(b => b.bondActualType === 'local').length;
+    const treasuryCount = this.bonds.filter(b => b.bondActualType === 'treasury').length;
+    
     console.log(`读取到 ${this.bonds.length} 条债券数据`);
+    console.log(`其中：地方债 ${localCount} 条，国债 ${treasuryCount} 条`);
     this.result.totalRows = this.bonds.length;
   }
 
   /**
-   * 判断债券类型
-   * 规则：读取C列，如果包含地理名词则为地方债，否则为国债
-   */
-  private determineBondType(): void {
-    console.log('判断债券类型（读取C列）...');
-
-    let hasGeographyKeyword = false;
-
-    for (const bond of this.bonds) {
-      if (containsGeographyKeyword(bond.bondName)) {
-        hasGeographyKeyword = true;
-        console.log(`  "${bond.bondName}" 包含地理名词`);
-      }
-    }
-
-    this.result.bondType = hasGeographyKeyword ? 'local' : 'treasury';
-    console.log(`检查了 ${this.bonds.length} 行，包含地理名词: ${hasGeographyKeyword}`);
-  }
-
-  /**
    * 多金额匹配债券
-   * 每个金额形成一个债券集合，集合间可以拆分同一只券
+   * 根据用户选择的类型过滤债券
    * 排除被禁挑的债券
    */
   private matchBondsByAmounts(): void {
     console.log('开始多金额匹配债券...');
+    console.log(`用户选择类型: ${this.bondType === 'local' ? '地方债' : '国债'}`);
 
-    // 过滤掉被禁挑的债券
-    const availableBonds = this.bonds.filter(bond => !this.isBondExcluded(bond));
-    this.result.excludedCount = this.bonds.length - availableBonds.length;
-    
-    console.log(`可用债券: ${availableBonds.length} 条，禁挑: ${this.result.excludedCount} 条`);
+    // 第一步：根据用户选择的类型过滤债券
+    let filteredBonds = this.bonds.filter(bond => bond.bondActualType === this.bondType);
+    this.result.typeFilteredCount = this.bonds.length - filteredBonds.length;
+    console.log(`类型过滤: 保留 ${filteredBonds.length} 条${this.bondType === 'local' ? '地方债' : '国债'}，过滤 ${this.result.typeFilteredCount} 条其他类型`);
+
+    // 第二步：过滤掉被禁挑的债券
+    const availableBonds = filteredBonds.filter(bond => !this.isBondExcluded(bond));
+    this.result.excludedCount = filteredBonds.length - availableBonds.length;
+    console.log(`禁挑券过滤: 禁挑 ${this.result.excludedCount} 条，可用 ${availableBonds.length} 条`);
 
     // 计算总可用金额
     this.result.totalAvailable = availableBonds.reduce((sum, bond) => sum + bond.availableAmount, 0);
     console.log('总可用金额:', this.result.totalAvailable, '万元');
+
+    if (availableBonds.length === 0) {
+      console.warn('警告：没有符合条件的债券可挑选！');
+      return;
+    }
 
     // 按可用金额从大到小排序（全局排序一次）
     const sortedBonds = [...availableBonds].sort((a, b) => b.availableAmount - a.availableAmount);
@@ -549,20 +553,5 @@ export class CouponMatcher {
     }
 
     console.log('结果Excel生成完成，总行数:', currentRowNumber - 1);
-  }
-
-  /**
-   * 复制单元格样式
-   */
-  private copyCellStyle(sourceCell: ExcelJS.Cell, targetCell: ExcelJS.Cell): void {
-    try {
-      if (sourceCell.font) targetCell.font = { ...sourceCell.font };
-      if (sourceCell.fill) targetCell.fill = { ...sourceCell.fill };
-      if (sourceCell.border) targetCell.border = { ...sourceCell.border };
-      if (sourceCell.alignment) targetCell.alignment = { ...sourceCell.alignment };
-      if (sourceCell.numFmt) targetCell.numFmt = sourceCell.numFmt;
-    } catch (e) {
-      // 忽略样式复制错误
-    }
   }
 }

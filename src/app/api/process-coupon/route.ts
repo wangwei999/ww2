@@ -63,10 +63,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 解析禁挑券列表
+    // 解析禁挑券列表（支持中英文逗号）
     let excludedBonds: string[] = [];
     if (excludedBondsStr && excludedBondsStr.trim()) {
-      excludedBonds = excludedBondsStr.split(/[,\s\n]+/).map(s => s.trim()).filter(s => s);
+      excludedBonds = excludedBondsStr.split(/[,，\s\n]+/).map(s => s.trim()).filter(s => s);
     }
 
     console.log('挑券请求参数:', {

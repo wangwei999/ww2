@@ -173,8 +173,8 @@ export default function Home() {
   const parseAmounts = (value: string): number[] => {
     if (!value.trim()) return [];
     
-    // 按逗号、空格、换行分隔
-    const parts = value.split(/[,\s\n]+/).filter(s => s.trim() !== '');
+    // 按中英文逗号、空格、换行分隔
+    const parts = value.split(/[,，\s\n]+/).filter(s => s.trim() !== '');
     
     const amounts: number[] = [];
     for (const part of parts) {
@@ -511,11 +511,11 @@ export default function Home() {
               <div>
                 <Label className="text-base font-semibold">挑券金额</Label>
                 <p className="text-sm text-muted-foreground mt-1">
-                  支持输入多个金额，用逗号、空格或换行分隔（单位：万元）
+                  支持输入多个金额，用中英文逗号、空格或换行分隔（单位：万元）
                 </p>
               </div>
               <textarea
-                placeholder="请输入金额，多个金额用逗号、空格或换行分隔&#10;例如：5000, 4000 或每行一个金额"
+                placeholder="请输入金额，多个金额用逗号、空格或换行分隔&#10;例如：5000, 4000 或 5000，4000（中英文逗号均可）"
                 value={couponAmount}
                 onChange={(e) => handleCouponAmountChange(e.target.value)}
                 className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
@@ -550,7 +550,7 @@ export default function Home() {
               <div>
                 <Label className="text-base font-semibold">禁挑券（可选）</Label>
                 <p className="text-sm text-muted-foreground mt-1">
-                  输入需要排除的债券，支持多个，用逗号、空格或换行分隔
+                  输入需要排除的债券，支持多个，用中英文逗号、空格或换行分隔
                 </p>
               </div>
               <textarea
@@ -564,7 +564,7 @@ export default function Home() {
                 <div className="space-y-2">
                   <Label className="text-sm font-medium">已解析的禁挑券：</Label>
                   <div className="flex flex-wrap gap-2">
-                    {excludedBonds.split(/[,\s\n]+/).filter(s => s.trim()).map((item, index) => (
+                    {excludedBonds.split(/[,，\s\n]+/).filter(s => s.trim()).map((item, index) => (
                       <div
                         key={index}
                         className="px-3 py-1 bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400 rounded-full text-sm font-medium"

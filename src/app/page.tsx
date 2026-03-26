@@ -8,9 +8,9 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Upload, FileSpreadsheet, Download, Loader2, CheckCircle, AlertCircle, X, FileText, Ticket } from 'lucide-react';
 import { toast } from 'sonner';
-import Link from 'next/link';
 
-type ProcessMode = 'normal' | 'credit' | 'pdf' | 'basic';
+type ProcessMode = 'coupon' | 'normal' | 'credit' | 'pdf' | 'basic';
+type BondType = 'treasury' | 'local'; // 国债 / 地方债
 
 interface FileUploadProps {
   label: string;
@@ -87,7 +87,7 @@ function FileUpload({ label, description, file, onFileChange, acceptedTypes }: F
 }
 
 export default function Home() {
-  const [mode, setMode] = useState<ProcessMode>('normal');
+  const [mode, setMode] = useState<ProcessMode>('coupon');
   const [fileA, setFileA] = useState<File | null>(null);
   const [fileB, setFileB] = useState<File | null>(null);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
@@ -96,6 +96,11 @@ export default function Home() {
   const [enterpriseNameFile, setEnterpriseNameFile] = useState<File | null>(null);
   const [qichachaDataFile, setQichachaDataFile] = useState<File | null>(null);
   const [reportFieldsFile, setReportFieldsFile] = useState<File | null>(null);
+  // 挑券模式
+  const [couponFile, setCouponFile] = useState<File | null>(null);
+  const [bondType, setBondType] = useState<BondType>('treasury');
+  const [couponAmount, setCouponAmount] = useState<string>('');
+  
   const [processing, setProcessing] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [hasProcessedFile, setHasProcessedFile] = useState(false);
@@ -152,12 +157,86 @@ export default function Home() {
     clearProcessedState();
   };
 
+  // 挑券模式文件处理
+  const handleCouponFileChange = (file: File | null) => {
+    setCouponFile(file);
+    clearProcessedState();
+  };
+
+  const handleCouponAmountChange = (value: string) => {
+    // 只允许输入数字和小数点
+    const regex = /^[0-9]*\.?[0-9]*$/;
+    if (value === '' || regex.test(value)) {
+      setCouponAmount(value);
+    }
+  };
+
   const handleModeChange = (newMode: ProcessMode) => {
     setMode(newMode);
     clearProcessedState();
   };
 
   const handleProcess = async () => {
+    // 挑券模式处理
+    if (mode === 'coupon') {
+      if (!couponFile) {
+        toast.error('请上传Excel文件');
+        return;
+      }
+
+      if (!couponAmount || parseFloat(couponAmount) <= 0) {
+        toast.error('请输入有效的挑券金额');
+        return;
+      }
+
+      setProcessing(true);
+
+      try {
+        const formData = new FormData();
+        formData.append('file', couponFile);
+        formData.append('bondType', bondType);
+        formData.append('amount', couponAmount);
+
+        const response = await fetch('/api/process-coupon', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || '处理失败');
+        }
+
+        // 从响应头获取文件名
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = `挑券结果_${Date.now()}.xlsx`;
+        if (contentDisposition) {
+          const filenameMatch = contentDisposition.match(/filename\*?=['"]?(?:UTF-\d['"]*)?([^;'"]+)/i);
+          if (filenameMatch) {
+            filename = decodeURIComponent(filenameMatch[1]);
+          }
+        }
+
+        // 下载文件
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.click();
+        window.URL.revokeObjectURL(url);
+
+        toast.success('挑券处理完成，文件已下载！');
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : '处理失败，请重试';
+        toast.error(errorMessage);
+        console.error('处理错误:', error);
+      } finally {
+        setProcessing(false);
+      }
+      return;
+    }
+
     if (mode === 'basic') {
       // 基础数据处理
       console.log('基础数据处理 - enterpriseNameFile:', enterpriseNameFile?.name, 
@@ -362,6 +441,75 @@ export default function Home() {
 
   // 根据模式获取文件上传组件
   const renderFileUploads = () => {
+    // 挑券模式
+    if (mode === 'coupon') {
+      return (
+        <div className="space-y-6">
+          {/* 文件上传 */}
+          <FileUpload
+            label="上传Excel文件"
+            description="上传包含债券数据的Excel文件"
+            file={couponFile}
+            onFileChange={handleCouponFileChange}
+            acceptedTypes=".xlsx,.xls"
+          />
+
+          {/* 债券类型选择 */}
+          <Card className="p-6">
+            <div className="space-y-4">
+              <Label className="text-base font-semibold">选择债券类型</Label>
+              <RadioGroup
+                value={bondType}
+                onValueChange={(value) => setBondType(value as BondType)}
+                className="grid grid-cols-2 gap-4"
+              >
+                <div className="flex items-center space-x-2 p-4 border rounded-lg hover:bg-muted/50 cursor-pointer">
+                  <RadioGroupItem value="treasury" id="treasury" />
+                  <div className="flex-1">
+                    <Label htmlFor="treasury" className="font-medium cursor-pointer">国债</Label>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      筛选国债类型债券
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2 p-4 border rounded-lg hover:bg-muted/50 cursor-pointer">
+                  <RadioGroupItem value="local" id="local" />
+                  <div className="flex-1">
+                    <Label htmlFor="local" className="font-medium cursor-pointer">地方债</Label>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      筛选地方债类型债券
+                    </p>
+                  </div>
+                </div>
+              </RadioGroup>
+            </div>
+          </Card>
+
+          {/* 挑券金额输入 */}
+          <Card className="p-6">
+            <div className="space-y-4">
+              <div>
+                <Label className="text-base font-semibold">挑券金额</Label>
+                <p className="text-sm text-muted-foreground mt-1">
+                  输入需要筛选的债券金额
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="text"
+                  placeholder="请输入金额"
+                  value={couponAmount}
+                  onChange={(e) => handleCouponAmountChange(e.target.value)}
+                  className="flex-1"
+                />
+                <span className="text-muted-foreground whitespace-nowrap">万元</span>
+              </div>
+            </div>
+          </Card>
+        </div>
+      );
+    }
+
     if (mode === 'pdf') {
       return (
         <div className="space-y-6">
@@ -438,6 +586,9 @@ export default function Home() {
   // 获取处理按钮是否禁用
   const isProcessDisabled = () => {
     if (processing) return true;
+    if (mode === 'coupon') {
+      return !couponFile || !couponAmount || parseFloat(couponAmount) <= 0;
+    }
     if (mode === 'pdf') {
       return !pdfFile || !excelFile;
     }
@@ -448,10 +599,26 @@ export default function Home() {
     return !fileA || !fileB;
   };
 
-  // 获取下载按钮是否禁用（授信写入模式和基础数据模式直接下载，不需要下载按钮）
+  // 获取下载按钮是否禁用（挑券模式、授信写入模式和基础数据模式直接下载，不需要下载按钮）
   const isDownloadDisabled = () => {
-    if (mode === 'pdf' || mode === 'basic') return true;
+    if (mode === 'coupon' || mode === 'pdf' || mode === 'basic') return true;
     return downloading || !hasProcessedFile;
+  };
+
+  // 获取处理按钮文本
+  const getProcessButtonText = () => {
+    if (processing) return '处理中...';
+    if (mode === 'coupon') return '开始挑券';
+    if (mode === 'pdf') return '识别并处理';
+    return '开始处理';
+  };
+
+  // 获取处理按钮图标
+  const getProcessButtonIcon = () => {
+    if (processing) return <Loader2 className="mr-2 h-4 w-4 animate-spin" />;
+    if (mode === 'coupon') return <Ticket className="mr-2 h-4 w-4" />;
+    if (mode === 'pdf') return <FileText className="mr-2 h-4 w-4" />;
+    return <Upload className="mr-2 h-4 w-4" />;
   };
 
   return (
@@ -468,16 +635,6 @@ export default function Home() {
           </p>
         </div>
 
-        {/* 挑券入口 */}
-        <div className="flex justify-center">
-          <Link href="/coupon">
-            <Button variant="outline" size="lg" className="gap-2">
-              <Ticket className="h-5 w-5" />
-              进入挑券功能
-            </Button>
-          </Link>
-        </div>
-
         {/* 模式选择 */}
         <Card className="p-6">
           <div className="space-y-4">
@@ -485,8 +642,17 @@ export default function Home() {
             <RadioGroup
               value={mode}
               onValueChange={(value) => handleModeChange(value as ProcessMode)}
-              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4"
             >
+              <div className="flex items-center space-x-2 p-4 border rounded-lg hover:bg-muted/50 cursor-pointer">
+                <RadioGroupItem value="coupon" id="coupon" />
+                <div className="flex-1">
+                  <Label htmlFor="coupon" className="font-medium cursor-pointer">挑券</Label>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    根据金额筛选国债/地方债
+                  </p>
+                </div>
+              </div>
               <div className="flex items-center space-x-2 p-4 border rounded-lg hover:bg-muted/50 cursor-pointer">
                 <RadioGroupItem value="normal" id="normal" />
                 <div className="flex-1">
@@ -530,9 +696,15 @@ export default function Home() {
         {/* 功能说明 */}
         <Card className="p-6 bg-muted/50">
           <h3 className="font-semibold mb-3">
-            {mode === 'pdf' ? '授信写入功能' : mode === 'basic' ? '基础数据处理功能' : '支持的功能'}
+            {mode === 'coupon' ? '挑券功能' : mode === 'pdf' ? '授信写入功能' : mode === 'basic' ? '基础数据处理功能' : '支持的功能'}
           </h3>
-          {mode === 'pdf' ? (
+          {mode === 'coupon' ? (
+            <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
+              <li>✓ 支持国债和地方债筛选</li>
+              <li>✓ 根据金额智能匹配债券</li>
+              <li>✓ 输出筛选结果Excel文件</li>
+            </ul>
+          ) : mode === 'pdf' ? (
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground">
               <li>✓ OCR识别扫描版PDF表格</li>
               <li>✓ 自动提取机构名称和授信品种</li>
@@ -575,30 +747,11 @@ export default function Home() {
             size="lg"
             className="min-w-[180px]"
           >
-            {processing ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                处理中...
-              </>
-            ) : mode === 'pdf' ? (
-              <>
-                <FileText className="mr-2 h-4 w-4" />
-                识别并处理
-              </>
-            ) : mode === 'basic' ? (
-              <>
-                <Upload className="mr-2 h-4 w-4" />
-                开始处理
-              </>
-            ) : (
-              <>
-                <Upload className="mr-2 h-4 w-4" />
-                开始处理
-              </>
-            )}
+            {getProcessButtonIcon()}
+            {getProcessButtonText()}
           </Button>
 
-          {mode !== 'pdf' && mode !== 'basic' && (
+          {mode !== 'coupon' && mode !== 'pdf' && mode !== 'basic' && (
             <div className="flex flex-col items-center gap-2">
               <Button
                 onClick={handleDownload}
@@ -639,7 +792,13 @@ export default function Home() {
             <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
             <div className="space-y-1 text-sm">
               <p className="font-medium text-amber-900 dark:text-amber-200">使用说明</p>
-              {mode === 'pdf' ? (
+              {mode === 'coupon' ? (
+                <ul className="text-amber-800 dark:text-amber-300/80 space-y-1 list-disc list-inside">
+                  <li>请确保上传的Excel文件包含债券数据</li>
+                  <li>选择正确的债券类型（国债或地方债）</li>
+                  <li>输入挑券金额（单位：万元）后点击"开始挑券"</li>
+                </ul>
+              ) : mode === 'pdf' ? (
                 <ul className="text-amber-800 dark:text-amber-300/80 space-y-1 list-disc list-inside">
                   <li>文件A必须是扫描版PDF，包含机构名称和授信品种表格</li>
                   <li>文件B必须包含"单体"或"集团"工作表</li>
